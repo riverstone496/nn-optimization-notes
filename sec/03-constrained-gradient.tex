@@ -1,0 +1,536 @@
+\documentclass[../main.tex]{subfiles}
+
+\begin{document}
+% 単独でコンパイルした場合も、全体版と章番号をそろえる。
+\ifSubfilesClassLoaded{\setcounter{chapter}{2}}{}
+
+\chapter{AdaGrad}
+
+前章では，近接項に使う行列によって，勾配をどのように前処理するかが決まることを見た．
+この行列を，学習の良し悪しを測る基準から選ぶことはできるだろうか．
+AdaGradは，それまでの勾配の二乗を蓄積し，その平方根を使って更新の大きさを調整する方法である．
+ここでは，学習中の損失をリグレットという量で評価し，その上界を小さくする行列を求めることで，平方根が現れる理由を調べる\cite{duchi2011adagrad}．
+その後，AdaGradが用いる二次統計を小さい行列で近似する問題を考える．
+前章で導入したShampooとMuonを，今度は二次統計のKL近似として捉え直す．
+最後に，この二次統計とフィッシャー情報行列の違いを，バッチサイズに注目して調べる．
+
+\section{リグレットの上界と前処理行列の選び方}
+
+\subsection{リグレット}
+
+データが一つずつ与えられ，そのたびにパラメータを更新する学習を考える．
+時刻 $t$ には，それまでのデータから選んだパラメータ $\bm{\theta}^{(t)}\in\mathbb{R}^d$ で予測し，
+その後で今回のデータに対する損失 $\mathcal{L}_t$ と勾配
+$\bm{g}_t=\nabla\mathcal{L}_t(\bm{\theta}^{(t)})$ を知る．
+この勾配を使って $\bm{\theta}^{(t+1)}$ を決める．
+この設定をオンライン学習と呼ぶ．たとえば，各時刻に異なる訓練例を使うとき，$\mathcal{L}_t$ はその訓練例での損失である．
+
+学習の良し悪しを測るために，すべての時刻で同じパラメータ $\bm{\theta}^*$ を使った場合と比べる．
+両者の累積損失の差
+\begin{equation}
+  \mathcal{R}_T(\bm{\theta}^*)
+  :=\sum_{t=1}^T\mathcal{L}_t(\bm{\theta}^{(t)})
+  -\sum_{t=1}^T\mathcal{L}_t(\bm{\theta}^*)
+  \label{eq:adagrad-regret}
+\end{equation}
+を，$\bm{\theta}^*$ に対するリグレット（regret）という．
+比較相手には，あとから全データを見て累積損失を最小にするパラメータを選んでよい．
+その最小解が存在するなら，$\bm{\theta}^*\in\operatorname{argmin}_{\bm{u}}\sum_{t=1}^T\mathcal{L}_t(\bm{u})$ とする．
+リグレットの上界が $T$ より遅く増えれば，1回あたりの損失差の上界はゼロに近づく．
+未来を知らずに更新しても，固定した比較相手に対する平均の不利を小さくできる，という評価である．
+
+\subsection{リグレットの上界からAdaGradを導く}
+
+以下では，各 $\mathcal{L}_t$ が微分可能な凸関数であると仮定する．
+凸性から，任意の比較相手 $\bm{\theta}^*$ について
+\begin{equation}
+  \mathcal{L}_t(\bm{\theta}^{(t)})-\mathcal{L}_t(\bm{\theta}^*)
+  \leq\bm{g}_t^\top(\bm{\theta}^{(t)}-\bm{\theta}^*)
+  \label{eq:adagrad-convexity}
+\end{equation}
+が成り立つ．これは，凸関数のグラフがその接平面より下には来ないことを，$\bm{\theta}^*$ で評価した式である．
+したがって，右辺を足し合わせた量を抑えれば，リグレットも抑えられる．
+
+まず，正定値対称行列 $\bm{G}$ を学習中ずっと固定し，学習率 $\eta>0$ で
+\begin{equation}
+  \bm{\theta}^{(t+1)}=\bm{\theta}^{(t)}-\eta\bm{G}^{-1}\bm{g}_t
+  \label{eq:adagrad-fixed-update}
+\end{equation}
+と更新する場合を調べる．ここで $\bm{G}$ は近接項の行列であり，勾配に掛かる前処理行列は $\bm{G}^{-1}$ である．
+前章の自然勾配法ではフィッシャー情報行列 $\bm{F}$ を用いたが，ここでは $\bm{G}$ を勾配列から選ぶ．
+この更新は，$\bm{g}_t^\top\bm{\delta}+\bm{\delta}^\top\bm{G}\bm{\delta}/(2\eta)$ を最小にする更新量を選んでいる．
+
+比較相手までの距離が1回の更新でどう変わるかを計算する．
+$\|\bm{v}\|_{\bm{G}}^2:=\bm{v}^\top\bm{G}\bm{v}$ と書くと，更新式を代入して
+\begin{align}
+  \|\bm{\theta}^{(t+1)}-\bm{\theta}^*\|_{\bm{G}}^2
+  &=\|\bm{\theta}^{(t)}-\bm{\theta}^*\|_{\bm{G}}^2
+  -2\eta\bm{g}_t^\top(\bm{\theta}^{(t)}-\bm{\theta}^*)\notag\\
+  &\quad+\eta^2\bm{g}_t^\top\bm{G}^{-1}\bm{g}_t
+  \label{eq:adagrad-distance-identity}
+\end{align}
+を得る．第2項を左辺に移せば，式\eqref{eq:adagrad-convexity}の右辺を，更新前後の距離の差で表せる．
+これを $t=1,\ldots,T$ について足すと，途中の時刻の距離は相殺される．
+最後の距離の項は非正なので省くことができ，
+\begin{equation}
+  \mathcal{R}_T(\bm{\theta}^*)
+  \leq\frac{1}{2\eta}\|\bm{\theta}^{(1)}-\bm{\theta}^*\|_{\bm{G}}^2
+  +\frac{\eta}{2}\sum_{t=1}^T\bm{g}_t^\top\bm{G}^{-1}\bm{g}_t
+  \label{eq:adagrad-fixed-regret}
+\end{equation}
+となる．第1項は初期値から比較相手までの距離，第2項は学習中に得られた勾配による寄与である．
+
+この上界を，行列 $\bm{G}$ を選びやすい形に整理する．
+勾配の外積を足した行列を $\bm{V}_T:=\sum_{t=1}^T\bm{g}_t\bm{g}_t^\top$ とおく．
+その対角成分は各座標の勾配の二乗和，非対角成分は異なる座標の勾配の積の和である．
+これは勾配の二次統計を累積した行列である．
+行列の対角成分の和を $\operatorname{Tr}$ で表すと，
+$\sum_t\bm{g}_t^\top\bm{G}^{-1}\bm{g}_t=\operatorname{Tr}(\bm{G}^{-1}\bm{V}_T)$ と書ける．
+また，$D>0$ を $\|\bm{\theta}^{(1)}-\bm{\theta}^*\|_2\leq D$ を満たす定数とする．
+$\bm{G}$ の最大固有値は正の固有値の和 $\operatorname{Tr}(\bm{G})$ 以下だから，
+$\|\bm{\theta}^{(1)}-\bm{\theta}^*\|_{\bm{G}}^2\leq D^2\operatorname{Tr}(\bm{G})$ である．
+したがって，
+\begin{equation}
+  \mathcal{R}_T(\bm{\theta}^*)
+  \leq\frac{D^2}{2\eta}\operatorname{Tr}(\bm{G})
+  +\frac{\eta}{2}\operatorname{Tr}(\bm{G}^{-1}\bm{V}_T)
+  =:F(\bm{G})
+  \label{eq:adagrad-trace-bound}
+\end{equation}
+を得る．$\bm{G}$ を定数倍して大きくすれば，更新は小さくなり，第2項は減るが，第1項は増える．
+二つの項の釣り合いを考えて，$\bm{G}$ を選ぶ必要がある．
+
+そこで，観測した勾配列を固定し，その上界 $F(\bm{G})$ を最小にする正定値対称行列を求める．
+まず $\bm{V}_T$ が正定値の場合を考える．
+逆行列の微分 $d(\bm{G}^{-1})=-\bm{G}^{-1}(d\bm{G})\bm{G}^{-1}$ とトレースの巡回性を使うと，
+\[
+  dF=\operatorname{Tr}\!\left[
+  \left(\frac{D^2}{2\eta}\bm{I}
+  -\frac{\eta}{2}\bm{G}^{-1}\bm{V}_T\bm{G}^{-1}\right)d\bm{G}\right]
+\]
+となる．任意の対称な変化 $d\bm{G}$ に対してこれがゼロになる条件は，
+\begin{equation}
+  \bm{G}^{-1}\bm{V}_T\bm{G}^{-1}
+  =\frac{D^2}{\eta^2}\bm{I}
+  \label{eq:adagrad-optimality}
+\end{equation}
+である．両側から $\bm{G}$ を掛ければ $\bm{V}_T=(D^2/\eta^2)\bm{G}^2$ なので，
+\begin{equation}
+  \bm{G}_*=\frac{\eta}{D}\bm{V}_T^{1/2},
+  \qquad
+  F(\bm{G}_*)=D\operatorname{Tr}(\bm{V}_T^{1/2})
+  \label{eq:adagrad-optimal-metric}
+\end{equation}
+と求まる．$\bm{V}_T^{1/2}$ は，$\bm{V}_T$ を固有値分解し，各固有値を正の平方根に置き換えた行列である．
+$F$ は正定値対称行列上の凸関数なので，この停留条件を満たす $\bm{G}_*$ は最小解である．
+平方根は，上界を最小にする条件を解く過程で現れた．
+
+Duchiらは，行列の大きさを $\operatorname{Tr}(\bm{G})\leq c$（$c>0$）で制限し，
+$\operatorname{Tr}(\bm{G}^{-1}\bm{V}_T)$ を最小にする問題としても，この選択を説明している．
+その解は $\bm{G}_*=c\bm{V}_T^{1/2}/\operatorname{Tr}(\bm{V}_T^{1/2})$ であり，行列の形は同じである．
+全体の定数倍は学習率に吸収できるので，前処理の形として得られたのは $\bm{V}_T^{-1/2}$ である．
+
+この行列による勾配の変換は，次のように解釈できる．
+式\eqref{eq:adagrad-optimality}の左辺を展開すると，
+\begin{equation}
+  \sum_{t=1}^T
+  (\bm{G}_*^{-1}\bm{g}_t)(\bm{G}_*^{-1}\bm{g}_t)^\top
+  =\frac{D^2}{\eta^2}\bm{I}
+  \label{eq:adagrad-isotropy}
+\end{equation}
+となる．任意の単位ベクトル $\bm{u}$ を両側から掛ければ，
+$\sum_t(\bm{u}^\top\bm{G}_*^{-1}\bm{g}_t)^2=D^2/\eta^2$ である．
+つまり，過去の勾配をすべて同じ $\bm{G}_*^{-1}$ で変換すると，どの方向に射影しても二乗和が等しくなる．
+これを累積二次統計の等方化と呼ぶ．
+
+オンライン学習では，時刻 $t$ までの勾配から $\bm{V}_t=\sum_{s=1}^t\bm{g}_s\bm{g}_s^\top$ を計算し，
+その平方根で近接項を逐次更新する．すなわち，
+\begin{equation}
+  \bm{G}_t=\bm{V}_t^{1/2}+\varepsilon\bm{I},
+  \qquad
+  \bm{\theta}^{(t+1)}
+  =\bm{\theta}^{(t)}-\eta\bm{G}_t^{-1}\bm{g}_t,
+  \quad\varepsilon>0
+  \label{eq:adagrad-full-update}
+\end{equation}
+とする．これが行列全体を用いるAdaGrad（full-matrix AdaGrad）である．
+現在の勾配 $\bm{g}_t$ も蓄積してから，次のパラメータを求める．
+初期の $\bm{V}_t$ は一般に特異なので，$\varepsilon\bm{I}$ を加えて逆行列を定義できるようにしている．
+
+逐次更新のリグレットを評価するには，式\eqref{eq:adagrad-distance-identity}を足し合わせ，行列の変化に由来する距離の項も評価する．
+$\bm{G}_t-\bm{G}_{t-1}$ の半正定値性を使うと，この項を抑えられる．
+初期値だけでなく全時刻で $\|\bm{\theta}^{(t)}-\bm{\theta}^*\|_2\leq D$ と仮定すれば，
+その寄与は $D^2\operatorname{Tr}(\bm{G}_T)/(2\eta)$ 以下となる．
+さらに $\sum_{t=1}^T\bm{g}_t^\top\bm{G}_t^{-1}\bm{g}_t\leq2\operatorname{Tr}(\bm{V}_T^{1/2})$ を用いると，
+\begin{equation}
+  \mathcal{R}_T(\bm{\theta}^*)
+  \leq\left(\frac{D^2}{2\eta}+\eta\right)
+  \operatorname{Tr}(\bm{V}_T^{1/2})
+  +\frac{\varepsilon dD^2}{2\eta}
+  \label{eq:adagrad-adaptive-regret}
+\end{equation}
+を得る\cite{duchi2011adagrad}\footnote{ここでは，距離に由来する項をトレースで評価した，やや緩い上界を記した．}．
+このように，逐次更新する場合にも，事後的な最小値に現れた $\operatorname{Tr}(\bm{V}_T^{1/2})$ でリグレットを抑えられる．
+たとえば勾配の長さが $\|\bm{g}_t\|_2\leq K$ に抑えられていれば，
+$\operatorname{Tr}(\bm{V}_T^{1/2})\leq\sqrt{d\operatorname{Tr}(\bm{V}_T)}\leq K\sqrt{dT}$ である．
+$D,K,d,\eta,\varepsilon$ が $T$ に依存しなければ，上界は $O(\sqrt{T})$ で増え，1回あたりの損失差の上界はゼロに近づく．
+
+最後に，通常よく使われる，座標ごとのAdaGradを同じ考え方で導く．
+行列全体を蓄積すると $d^2$ 個の成分を持つ必要があるため，$\bm{G}$ を対角行列
+$\operatorname{diag}(a_1,\ldots,a_d)$（$a_i>0$）に制限する．
+この場合，式\eqref{eq:adagrad-trace-bound}の上界は
+\begin{equation}
+  F(\bm{G})
+  =\sum_{i=1}^d\left\{\frac{D^2}{2\eta}a_i
+  +\frac{\eta}{2a_i}\sum_{t=1}^Tg_{t,i}^2\right\}
+  \label{eq:adagrad-diagonal-objective}
+\end{equation}
+となり，座標ごとに最小化できる．
+各座標の二乗和が正なら，微分してゼロとおくことで
+$D^2/(2\eta)-\eta\sum_tg_{t,i}^2/(2a_i^2)=0$，したがって
+$a_i=(\eta/D)\sqrt{\sum_tg_{t,i}^2}$ を得る．
+ここでも二乗和の平方根が現れる．時刻 $t$ までの二乗和 $v_{t,i}:=\sum_{s=1}^t g_{s,i}^2$ を使い，
+先ほどと同様に $\varepsilon>0$ を加えると，更新は
+\begin{equation}
+  \theta_i^{(t+1)}
+  =\theta_i^{(t)}
+  -\frac{\eta}{\sqrt{v_{t,i}}+\varepsilon}\,g_{t,i},
+  \qquad i=1,\ldots,d
+  \label{eq:adagrad-diagonal-update}
+\end{equation}
+となる．これが対角版のAdaGradである\footnote{RMSProp\cite{tieleman2012rmsprop}は，勾配の二乗の累積和を指数移動平均 $v_{t,i}=\beta v_{t-1,i}+(1-\beta)g_{t,i}^2$（$0<\beta<1$）に置き換える．これにより，古い勾配の寄与を減衰させ，最近の勾配の大きさに応じて更新量を調整する．Adam\cite{kingma2015adam}は，勾配の二乗に加えて勾配そのものの指数移動平均も使う．両方の平均について初期値ゼロに由来する偏りを補正し，勾配の平均を勾配の二乗の平均の平方根で割って更新する．}．
+勾配の二乗が多く蓄積した座標ほど，同じ勾配に対する更新が小さくなる．
+各座標の二乗和だけを保存すればよいので，必要な記憶量は $O(d)$ である．
+対角版が調整するのは，各座標の勾配の二乗和である．
+近接項にどこまで自由な行列を使うかによって，計算量と，勾配の方向ごとの差を調整できる範囲が変わるのである．
+
+\section{KL最小化からone-sided ShampooとMuonへ}
+\label{sec:adagrad-kl}
+
+行列全体を使うAdaGradでは，$\bm{V}_t=\sum_{s=1}^t\bm{g}_s\bm{g}_s^\top$ を蓄積し，
+その逆平方根を勾配に掛けた．パラメータが多いと，この行列を保持し，逆平方根を求める計算が難しくなる．
+対角版はその一つの解決策だが，座標間の関係をすべて省いてしまう．
+前章のShampooのように，パラメータの行列としての形を利用して，より多くの関係を残すことはできるだろうか．
+
+ここでは，$\bm{V}_t$ を計算しやすい構造の行列で近似し，近似した行列の逆平方根を使う．
+その近似の良し悪しをKLダイバージェンスで測ると，one-sided Shampooが最適解として得られる\cite{lin2026klshampoo}．
+本節では，論文の期待値による二次統計を，前節のAdaGradに合わせて勾配外積の累積和で表す．
+この片側近似から，前章で導入したMuonの更新方向も得られる．
+近接ノルムの選択として見た更新を，ここではAdaGradの二次統計の近似として捉え直す．
+
+\subsection{one-sided Shampooの導出}
+
+前章と同じように，一つの層のパラメータを $\bm{W}_\ell\in\mathbb{R}^{m\times n}$ とし，
+以下では層 $\ell$ を固定し，勾配 $\bm{g}_s$ も $m\times n$ の行列として扱う．
+行列を列ごとに縦に並べる操作を $\operatorname{vec}$ と書くと，前節の累積行列は
+\begin{equation}
+  \bm{V}_t
+  =\sum_{s=1}^t\operatorname{vec}(\bm{g}_s)
+  \operatorname{vec}(\bm{g}_s)^\top
+  \label{eq:adagrad-matrix-second-moment}
+\end{equation}
+であり，大きさは $mn\times mn$ である．
+以下では時刻 $t$ と観測済みの勾配列を固定し，この行列をどう近似するかを考える．
+
+二つの正定値行列の違いを測るために，それぞれを共分散とする平均ゼロのガウス分布を用意する．
+まず，$\widetilde{\bm{V}}_t:=\bm{V}_t+\kappa\bm{I}_{mn}$（$\kappa>0$）として正定値性を保ち，
+近似する側の正定値行列を $\bm{S}$ とする．
+また，前章のKLはモデルの予測分布間の違いを測ったが，ここでは勾配の二次統計を表す行列間の違いを測る．
+
+連続分布のKLは，密度 $p,q$ に対して $D_{\mathrm{KL}}(p\|q)=\int p(\bm{z})\log(p(\bm{z})/q(\bm{z}))\,d\bm{z}$ と定める．
+ガウス密度の対数を代入し，$\mathbb{E}[\bm{z}\bm{z}^\top]=\widetilde{\bm{V}}_t$ を用いると，
+\begin{align}
+  \mathcal{D}_t(\bm{S})
+  &:=D_{\mathrm{KL}}\!\left(
+  \mathcal{N}(\bm{0},\widetilde{\bm{V}}_t)
+  \,\middle\|\,\mathcal{N}(\bm{0},\bm{S})\right)\notag\\
+  &=\frac12\left\{
+  \operatorname{Tr}(\bm{S}^{-1}\widetilde{\bm{V}}_t)
+  +\log\det\bm{S}-\log\det\widetilde{\bm{V}}_t-mn\right\}
+  \label{eq:adagrad-gaussian-kl}
+\end{align}
+を得る．構造を制限しなければ，$\bm{S}=\widetilde{\bm{V}}_t$ でKLはゼロになり，これが最小解である．
+その逆平方根を使うと，dampingを加えた行列全体のAdaGradに戻る\footnote{ここでは二次統計に $\kappa\bm{I}$ を加えてから逆平方根を取る．前節の式\eqref{eq:adagrad-full-update}では平方根の外に $\varepsilon\bm{I}$ を加えた．有限のdampingでは異なる更新だが，$\bm{V}_t$ が正定値なら，どちらもdampingをゼロにした極限で $\bm{V}_t^{-1/2}$ になる．}．
+
+次に，左から掛ける $m\times m$ の行列だけを使う，という制約を加える．
+そのために $\bm{S}=\bm{I}_n\otimes\bm{A}$ と選ぶ．
+$\otimes$ はクロネッカー積であり，ここでは対角ブロックに正定値行列 $\bm{A}$ を $n$ 個並べた行列を表す．
+この構造なら，
+\begin{equation}
+  (\bm{I}_n\otimes\bm{A})^{-1/2}
+  \operatorname{vec}(\bm{g}_t)
+  =\operatorname{vec}(\bm{A}^{-1/2}\bm{g}_t)
+  \label{eq:adagrad-one-sided-action}
+\end{equation}
+となり，勾配行列の各列に同じ $\bm{A}^{-1/2}$ を左から掛ければよい．
+列同士の二次統計を省く一方で，各列の中の行方向の関係は残している．
+
+この制約のもとでKLを最小にする $\bm{A}$ を求める．
+対角ブロックが $n$ 個あるので $\log\det(\bm{I}_n\otimes\bm{A})=n\log\det\bm{A}$ である．
+また，トレースの項は
+\begin{align}
+  \operatorname{Tr}\!\left[(\bm{I}_n\otimes\bm{A})^{-1}
+  \widetilde{\bm{V}}_t\right]
+  &=\sum_{s=1}^t\operatorname{Tr}
+  (\bm{g}_s^\top\bm{A}^{-1}\bm{g}_s)
+  +n\kappa\operatorname{Tr}(\bm{A}^{-1})\notag\\
+  &=\operatorname{Tr}\!\left[\bm{A}^{-1}
+  \left(\sum_{s=1}^t\bm{g}_s\bm{g}_s^\top+n\kappa\bm{I}_m\right)\right]
+  \label{eq:adagrad-one-sided-trace}
+\end{align}
+となる．$\bm{A}$ に依存しない項を省くと，最小化する式は
+\begin{equation}
+  \frac{n}{2}\log\det\bm{A}
+  +\frac12\operatorname{Tr}\!\left[\bm{A}^{-1}
+  \left(\sum_{s=1}^t\bm{g}_s\bm{g}_s^\top+n\kappa\bm{I}_m\right)\right]
+  \label{eq:adagrad-one-sided-objective}
+\end{equation}
+である．逆行列 $\bm{P}:=\bm{A}^{-1}$ を変数にすると，第1項は $-(n/2)\log\det\bm{P}$，第2項は $\bm{P}$ の一次式になる．
+微分してゼロとおく条件は
+\begin{equation}
+  -n\bm{P}^{-1}
+  +\sum_{s=1}^t\bm{g}_s\bm{g}_s^\top+n\kappa\bm{I}_m=\bm{0}
+\end{equation}
+なので，
+\begin{equation}
+  \bm{A}_t^*
+  =\frac1n\sum_{s=1}^t\bm{g}_s\bm{g}_s^\top+\kappa\bm{I}_m
+  \label{eq:adagrad-one-sided-optimum}
+\end{equation}
+を得る．$-\log\det\bm{P}$ は正定値行列上で狭義凸だから，これは唯一の最小解である．
+大きな $\bm{V}_t$ を実際に作らなくても，行方向の積を蓄積するだけで最適な近似を求められた．
+
+この近似行列の逆平方根を使えば，更新は
+\begin{equation}
+  \bm{W}_\ell^{(t+1)}
+  =\bm{W}_\ell^{(t)}-\eta(\bm{A}_t^*)^{-1/2}\bm{g}_t
+  \label{eq:adagrad-one-sided-shampoo}
+\end{equation}
+となる．これが，左側だけを使うone-sided Shampooである．
+前章のShampooは左右に $-1/4$ 乗を掛けたが，ここでは片側に $-1/2$ 乗を掛ける．
+右側だけを使う場合も，同じ計算から
+$\bm{B}_t^*=m^{-1}\sum_{s=1}^t\bm{g}_s^\top\bm{g}_s+\kappa\bm{I}_n$ を得て，
+更新方向を $\bm{g}_t(\bm{B}_t^*)^{-1/2}$ とすればよい．
+係数 $1/n$，$1/m$ はKLの最小化から決まり，元の勾配行列の形に依存している．
+
+\subsection{Muonとの関係}
+
+前章では，スペクトルノルムから得た更新方向を用いてMuonを導入した．
+ここでは，同じ方向がone-sided ShampooのKL最適解から現れることを確かめる．
+現在の勾配だけで同じKL近似を行うと，どのような更新になるだろうか．
+履歴を外し，近似の対象を
+$\operatorname{vec}(\bm{g}_t)\operatorname{vec}(\bm{g}_t)^\top+\kappa\bm{I}_{mn}$ とする．
+まず $m\leq n$ の場合に，行列の小さい側にあたる左側を使う．
+式\eqref{eq:adagrad-one-sided-optimum}は
+$\bm{A}_t^*=\bm{g}_t\bm{g}_t^\top/n+\kappa\bm{I}_m$ となる．
+
+前章と同じように，正の特異値だけを残した分解を
+$\bm{g}_t=\bm{U}_t\bm{\Sigma}_t\bm{Q}_t^\top$ と書く．
+累積行列 $\bm{V}_t$ と区別するため，右特異ベクトルを並べた行列は $\bm{Q}_t$ とした．
+特異値を $\sigma_{t,i}>0$ とすると，
+\begin{equation}
+  (\bm{A}_t^*)^{-1/2}\bm{g}_t
+  =\bm{U}_t\operatorname{diag}\!\left(
+  \frac{\sigma_{t,i}}{\sqrt{\sigma_{t,i}^2/n+\kappa}}\right)\bm{Q}_t^\top
+  \xrightarrow[\kappa\downarrow0]{}\sqrt{n}\,\bm{U}_t\bm{Q}_t^\top
+  \label{eq:adagrad-muon-limit}
+\end{equation}
+となる．$m>n$ なら右側を使い，同じ計算で $\sqrt{m}\,\bm{U}_t\bm{Q}_t^\top$ を得る．
+したがって，小さい側を使うone-sided Shampooのこの極限は，
+\begin{equation}
+  \bm{W}_\ell^{(t+1)}
+  =\bm{W}_\ell^{(t)}-\eta\sqrt{\max(m,n)}\,
+  \bm{U}_t\bm{Q}_t^\top
+  \label{eq:adagrad-scaled-muon}
+\end{equation}
+と書ける．これは，momentumを使わないMuonの更新方向に，行列の形から決まる係数を掛けたものである．
+特異値を $1$ にそろえる方向は，前章で示したmomentumなしのMuonと同じである．
+一つの行列だけを扱うなら $\sqrt{\max(m,n)}$ を学習率に吸収できるが，形の異なる層に共通の学習率を使う場合には，層ごとの更新量を変える係数として残る．
+
+現在の勾配の外積は高々階数1であり，$mn>1$ では特異になる．
+$\kappa>0$ でKL最小化を行ってから極限を取れば，階数不足の場合も更新方向を定義できる．
+負のべき乗を擬似逆行列の意味で使えば，同じ極限を直接表せる．
+ゼロの特異値方向には更新を加えず，$\bm{g}_t=\bm{0}$ なら更新しない．
+
+この意味で，Muonの基本となる行列の直交化は，AdaGradの二次統計を片側構造でKL最小化した結果として理解できる．
+履歴の使い方は，one-sided Shampooでは勾配外積の蓄積，Muonではmomentum行列の直交化である．
+
+両側を使う場合にも，KLによって近似を選べる．
+今度は $\bm{S}=\bm{B}\otimes\bm{A}$ として，正定値の $\bm{A},\bm{B}$ を両方とも変える．
+式を簡単にするため，$\bm{V}_t$ が正定値で $\kappa=0$ の場合を考えると，最適解が満たす条件は
+\begin{equation}
+  \bm{A}^*=\frac1n\sum_{s=1}^t
+  \bm{g}_s(\bm{B}^*)^{-1}\bm{g}_s^\top,
+  \qquad
+  \bm{B}^*=\frac1m\sum_{s=1}^t
+  \bm{g}_s^\top(\bm{A}^*)^{-1}\bm{g}_s
+  \label{eq:adagrad-two-sided-kl}
+\end{equation}
+となる．左右の行列は，互いの逆行列を使って定まる．
+この条件を満たす理想化したtwo-sidedのKL-Shampooでは，更新方向は
+$(\bm{A}^*)^{-1/2}\bm{g}_t(\bm{B}^*)^{-1/2}$ である．
+前章の通常のShampooでは，左右の積をそれぞれ独立に蓄積し，$-1/4$ 乗を使う．
+
+\subsection{Shampooの指数と左右の行列の作り方}
+\label{subsec:adagrad-shampoo-exponents}
+
+前項で得たtwo-sidedのKL-Shampooは，左右の行列の $-1/2$ 乗で勾配を前処理する．
+一方，第2章で紹介した通常のShampooは $-1/4$ 乗を使う．
+この指数の違いを，左右の行列の作り方と合わせて調べる．
+まず，通常のShampooから勾配の履歴とdampingを外し，指数を $-p$（$p>0$）とする．
+前項と同じ記号で $\bm{g}_t=\bm{U}_t\bm{\Sigma}_t\bm{Q}_t^\top$ と書くと，
+\begin{equation}
+  (\bm{g}_t\bm{g}_t^\top)^{-p}\bm{g}_t
+  (\bm{g}_t^\top\bm{g}_t)^{-p}
+  =\bm{U}_t\bm{\Sigma}_t^{1-4p}\bm{Q}_t^\top
+  \label{eq:adagrad-shampoo-general-exponent}
+\end{equation}
+となる．$p=1/4$ なら正の特異値がすべて $1$ になり，SpectralGDの方向を得る．
+$p=1/2$ なら，特異値は $\sigma_{t,i}^{-1}$ となり，もとの特異値が小さい方向ほど大きく更新する．
+
+一方，左右の行列の作り方を変えると，$p=1/2$ でもSpectralGDの方向が得られる．
+これを示したのが，EschenhagenらのProposition 4.8である\cite{eschenhagen2026clarifying}．
+同論文のKL-Shampooでは，左の行列を作るときに右の逆行列を，右の行列を作るときに左の逆行列を使う．
+その働きを見るため，勾配を一つの行列 $\bm{g}\in\mathbb{R}^{m\times n}$ に固定し，
+左右の行列だけを反復して更新する．
+以下の $s$ は，この内側の反復の回数を表す．
+次元の係数を付けない同論文の反復を用い，初期値を $\bm{A}_0=c\bm{I}_m$，$\bm{B}_0=c\bm{I}_n$（$c>0$）とする．
+$0<\beta<1$ に対して
+\begin{align}
+  \bm{A}_{s+1}
+  &=\beta\bm{A}_s+(1-\beta)\bm{g}\bm{B}_s^{-1}\bm{g}^\top,
+  \notag\\
+  \bm{B}_{s+1}
+  &=\beta\bm{B}_s+(1-\beta)\bm{g}^\top\bm{A}_s^{-1}\bm{g}
+  \label{eq:adagrad-coupled-shampoo-iteration}
+\end{align}
+とする．通常のShampooでは左右の積を独立に蓄積したが，ここでは相手側の行列で前処理してから積を取っている．
+
+この反復で各特異値方向に何が起こるかを調べる．
+正の特異値だけを残した分解を $\bm{g}=\bm{U}\bm{\Sigma}\bm{Q}^\top$ と書き，その階数を $r$ とする．
+初期値が単位行列の定数倍なので，$\bm{U}$，$\bm{Q}$ の基底では，左右の行列はそれぞれ対角のまま変化する．
+対応する第 $i$ 成分は同じ初期値から同じ式で更新されるので，共通の値を $a_{s,i}$ と書くと，
+\begin{equation}
+  a_{s+1,i}
+  =\beta a_{s,i}+(1-\beta)\frac{\sigma_i^2}{a_{s,i}},
+  \qquad a_{0,i}=c,\qquad i=1,\ldots,r
+  \label{eq:adagrad-coupled-shampoo-scalar}
+\end{equation}
+となる．この式の正の固定点は $a_i=\sigma_i$ である．
+とくに $\beta=1/2$ なら，$a_{s+1,i}=(a_{s,i}+\sigma_i^2/a_{s,i})/2$ となり，
+平方根 $\sqrt{\sigma_i^2}$ を求めるニュートン法そのものである．
+
+一般の $0<\beta<1$ でも，この反復は $\sigma_i$ に収束する．
+実際，$z_s:=\log(a_{s,i}/\sigma_i)$ とおくと，
+$z_{s+1}=\log(\beta e^{z_s}+(1-\beta)e^{-z_s})$ である．
+$z_s\ne0$ なら，対数の中の値は $e^{-|z_s|}$ と $e^{|z_s|}$ の間にあるため，$|z_{s+1}|<|z_s|$ となる．
+写像の連続性と合わせると，$|z_s|$ の極限はゼロであり，$a_{s,i}\to\sigma_i$ を得る．
+また，勾配がゼロの特異値方向では，左右の行列の固有値は $c\beta^s$ でゼロに近づく．
+したがって，行列としての極限は
+\begin{equation}
+  \bm{A}_\infty=\bm{U}\bm{\Sigma}\bm{U}^\top
+  =(\bm{g}\bm{g}^\top)^{1/2},\qquad
+  \bm{B}_\infty=\bm{Q}\bm{\Sigma}\bm{Q}^\top
+  =(\bm{g}^\top\bm{g})^{1/2}
+  \label{eq:adagrad-coupled-shampoo-limit}
+\end{equation}
+となる．相手側の逆行列を使うことで，左右の行列の正の固有値は，勾配の特異値の二乗 $\sigma_i^2$ から特異値 $\sigma_i$ へ変わる．
+
+この極限の行列で勾配を前処理すると，
+\begin{equation}
+  \bm{A}_\infty^{-p}\bm{g}\bm{B}_\infty^{-p}
+  =\bm{U}\bm{\Sigma}^{1-2p}\bm{Q}^\top,
+  \qquad
+  \bm{A}_\infty^{-1/2}\bm{g}\bm{B}_\infty^{-1/2}
+  =\bm{U}\bm{Q}^\top
+  \label{eq:adagrad-coupled-shampoo-spectral}
+\end{equation}
+を得る．極限でゼロとなる固有値については，擬似逆行列の意味で負のべき乗を取っている．
+これがProposition 4.8の結論である．
+通常のShampooでは $\sigma_i^2$ を持つ行列に $-1/4$ 乗を掛け，
+この結合した反復の極限では $\sigma_i$ を持つ行列に $-1/2$ 乗を掛ける．
+どちらも，左右から $\sigma_i^{-1/2}$ ずつ掛けるため，更新方向の特異値が $1$ にそろう．
+Shampooの指数の意味は，前処理に使う行列がどのような統計を表すかと合わせて理解できる．
+この見方から著者らは，$p=1/2$ のShampooが $p=1/4$ の場合よりKL-Shampooをよく近似する，という仮説を挙げている．
+
+\section{フィッシャー情報行列とバッチ勾配の二次統計}
+\label{sec:adagrad-fisher-batch}
+
+AdaGradとフィッシャー情報行列の違いは，勾配の外積を何について平均するかにある．
+さらに，1サンプルごとの勾配の外積を平均するのか，バッチで平均した勾配の外積を取るのかによっても，得られる行列は変わる．
+この違いを，Grosseの講義ノートの式(2)，(4)に沿って調べる\cite{grosse2021adaptive}．
+
+ここではパラメータを再びベクトル $\bm{\theta}\in\mathbb{R}^d$ として扱い，一つの点に固定する．
+入力とラベルの組を $z=(\bm{x},y)$，訓練データの分布を $q$ とする．
+前章と同じ分類モデルを用い，1サンプルの損失を負の対数尤度 $\mathcal{L}_z(\bm{\theta})=-\log p_{\bm{\theta}}(y\mid\bm{x})$ とし，
+その勾配を $\bm{g}(z):=\nabla\mathcal{L}_z(\bm{\theta})$ と書く．
+平均損失は $\mathcal{L}(\bm{\theta})=\mathbb{E}_{z\sim q}[\mathcal{L}_z(\bm{\theta})]$ である．
+勾配の平均を $\bar{\bm{g}}:=\mathbb{E}_{z\sim q}[\bm{g}(z)]=\nabla\mathcal{L}(\bm{\theta})$，
+勾配の共分散を $\bm{C}:=\mathbb{E}_{z\sim q}[(\bm{g}(z)-\bar{\bm{g}})(\bm{g}(z)-\bar{\bm{g}})^\top]$ とおく\footnote{期待値と微分を交換でき，勾配の二次モーメントが有限であると仮定する．}．
+
+訓練データのラベルを使った勾配外積の平均を，経験フィッシャー行列（empirical Fisher）と呼ぶ．
+共分散の定義を展開すれば，
+\begin{equation}
+  \bm{F}_{\mathrm{emp}}
+  :=\mathbb{E}_{z\sim q}[\bm{g}(z)\bm{g}(z)^\top]
+  =\bm{C}+\bar{\bm{g}}\bar{\bm{g}}^\top
+  \label{eq:adagrad-empirical-fisher}
+\end{equation}
+となる．これが講義ノートの式(2)である．
+
+これに対し，前章で導いたフィッシャー情報行列は，入力を同じ分布で平均するとしても，
+ラベルをモデル自身の予測分布から取る．すなわち，$q_{\bm{x}}$ を $q$ の入力の周辺分布として，
+\begin{equation}
+  \bm{F}
+  =\mathbb{E}_{\bm{x}\sim q_{\bm{x}}}
+  \mathbb{E}_{y\sim p_{\bm{\theta}}(\cdot\mid\bm{x})}
+  [\bm{g}(\bm{x},y)\bm{g}(\bm{x},y)^\top]
+  \label{eq:adagrad-model-fisher}
+\end{equation}
+である．モデルの分布で平均すると，スコアの平均はゼロになる．
+実際，$\sum_y p_{\bm{\theta}}(y\mid\bm{x})\nabla\log p_{\bm{\theta}}(y\mid\bm{x})
+=\nabla\sum_y p_{\bm{\theta}}(y\mid\bm{x})=\bm{0}$ である．
+訓練ラベルの条件付き分布がモデルと一致し，$q(y\mid\bm{x})=p_{\bm{\theta}}(y\mid\bm{x})$ なら，
+$\bm{F}_{\mathrm{emp}}=\bm{F}$ となる．
+
+次に，バッチサイズを $B$ とし，$z_1,\ldots,z_B$ を $q$ から独立に取る．
+バッチ損失をサンプルごとの損失の平均で定義すると，その勾配も
+\begin{equation}
+  \bm{g}_B:=\frac1B\sum_{i=1}^B\bm{g}(z_i)
+  \label{eq:adagrad-batch-gradient}
+\end{equation}
+という平均になる．$\mathbb{E}[\bm{g}_B]=\bar{\bm{g}}$ である一方，独立性から共分散は $\bm{C}/B$ になる．
+したがって，バッチ勾配を使った二次統計は
+\begin{align}
+  \bm{F}_{\mathrm{emp}}^{(B)}
+  &:=\mathbb{E}[\bm{g}_B\bm{g}_B^\top]\notag\\
+  &=\frac{1}{B^2}\left\{
+  B\bm{F}_{\mathrm{emp}}+B(B-1)\bar{\bm{g}}\bar{\bm{g}}^\top\right\}\notag\\
+  &=\frac1B\bm{C}+\bar{\bm{g}}\bar{\bm{g}}^\top
+  \label{eq:adagrad-batch-fisher}
+\end{align}
+となる．第2行では，同じサンプルの積が $B$ 個，異なるサンプル同士の積が $B(B-1)$ 個あることを使った．
+後者の期待値は独立性によって $\bar{\bm{g}}\bar{\bm{g}}^\top$ に分かれる．
+これが講義ノートの式(4)である．共分散の寄与は $1/B$ に減り，勾配の平均の外積はそのまま残る．
+
+式\eqref{eq:adagrad-empirical-fisher}と式\eqref{eq:adagrad-batch-fisher}の差は
+\begin{equation}
+  \bm{F}_{\mathrm{emp}}-\bm{F}_{\mathrm{emp}}^{(B)}
+  =\left(1-\frac1B\right)\bm{C}
+  \label{eq:adagrad-batch-fisher-gap}
+\end{equation}
+である．$\bm{C}\ne\bm{0}$ なら，$B=1$ で一致していた二つの行列の差は，$B$ とともに大きくなる．
+大きなバッチでは共分散の寄与が弱まり，$B\to\infty$ で
+$\bm{F}_{\mathrm{emp}}^{(B)}\to\bar{\bm{g}}\bar{\bm{g}}^\top$ となる．
+勾配の平均がゼロでなければ，極限で残るのはその方向だけを表す階数1の行列である．
+
+ミニバッチでAdaGradを使うとき，蓄積するのは通常 $\bm{g}_{B,t}\bm{g}_{B,t}^\top$ である．
+各時刻のパラメータを固定した条件付き期待値は，式\eqref{eq:adagrad-batch-fisher}の行列になる．
+1サンプルごとの外積を平均した行列とは，平均と外積を取る順序が違う．
+前者はバッチサイズに依存し，後者の期待値は $B$ によらず $\bm{F}_{\mathrm{emp}}$ である．
+したがって，AdaGradやその構造化近似が整える二次統計は，バッチサイズによっても変わる．
+さらに，二次統計が $\bm{F}$ に一致する場合であっても，AdaGradが掛けるのは累積行列の逆平方根であり，自然勾配法の $\bm{F}^{-1}$ とは異なる．
+
+\chapterbibliography
+
+\end{document}

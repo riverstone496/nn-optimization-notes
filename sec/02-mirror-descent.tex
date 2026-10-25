@@ -1,0 +1,753 @@
+\documentclass[../main.tex]{subfiles}
+
+\begin{document}
+% 単独でコンパイルした場合も、全体版と章番号をそろえる。
+\ifSubfilesClassLoaded{\setcounter{chapter}{1}}{}
+
+\chapter{近接項から見る前処理勾配法}
+
+損失を小さくするには，現在のパラメータをどのように更新すればよいだろうか．
+ここでは，損失を減らすことと，現在の点から大きく離れすぎないことを，一つの最小化問題で考える．
+更新量を抑える項を近接項と呼び，損失の近似と組み合わせることで，勾配を使った更新を導く．
+この見方では，前処理にも自然な意味がある．
+何をもって「近い」とするかを変えると，勾配に施す前処理も変わるのである．
+まず，通常の勾配降下法をこの視点から導く．
+
+\section{近接項による更新の定式化}
+
+\subsection{勾配降下法}
+
+微分可能な損失関数を $\mathcal{L}\colon\mathbb{R}^d\to\mathbb{R}$ とし，
+第 $k$ 回の反復におけるパラメータを $\bm{\theta}^{(k)}$ と書く．
+損失を小さくすると同時に，現在のパラメータから大きく離れないよう，近接点法では
+\begin{equation}
+  \bm{\theta}^{(k+1)}=\underset{\bm{u}}{\operatorname{argmin}}
+  \left\{\mathcal{L}(\bm{u})
+  +\frac{\lambda}{2}\|\bm{u}-\bm{\theta}^{(k)}\|_2^2\right\},
+  \qquad\lambda>0
+  \label{eq:md-proximal-point}
+\end{equation}
+を解く\footnote{この最小解が存在すると仮定する．}．第1項が損失，第2項が更新量を抑える近接項である．
+$\lambda$ を大きくするほど，現在の点から離れることへの重みが増す．
+
+最小解では $\bm{u}$ についての勾配がゼロになるので，
+\begin{equation}
+  \nabla\mathcal{L}(\bm{\theta}^{(k+1)})
+  +\lambda(\bm{\theta}^{(k+1)}-\bm{\theta}^{(k)})=\bm{0}
+\end{equation}
+が成り立つ．$\eta:=1/\lambda$ とおき，更新後のパラメータについて整理すると，
+\begin{equation}
+  \bm{\theta}^{(k+1)}=\bm{\theta}^{(k)}
+  -\eta\nabla\mathcal{L}(\bm{\theta}^{(k+1)})
+  \label{eq:md-implicit-gradient}
+\end{equation}
+を得る．右辺にも未知の $\bm{\theta}^{(k+1)}$ が含まれているため，これは陰的な更新式である．
+このままでは，現在のパラメータ $\bm{\theta}^{(k)}$ を右辺に代入するだけで，次のパラメータ $\bm{\theta}^{(k+1)}$ を求めることはできない．
+更新先を求めるには，この方程式を解く必要がある\footnote{各反復で抽出したデータの損失を使い，この陰的な更新式を解く方法をimplicit SGDと呼ぶ．
+陰的な更新には，学習率の選択に対して安定性を保ちやすいという利点がある\cite{toulis2016stability}．
+たとえば，$\mathcal{L}(\theta)=h\theta^2/2$（$h>0$）では，通常の勾配降下法は現在の値を $1-\eta h$ 倍するのに対し，陰的な更新は $1/(1+\eta h)$ 倍する．
+後者は，どの $\eta>0$ でも最小点 $0$ に近づく．}．
+
+そこで，右辺の勾配を，更新前の点での勾配に置き換えることを考える．
+更新量が小さく，その範囲で勾配があまり変わらない場合には，
+\begin{equation}
+  \nabla\mathcal{L}(\bm{\theta}^{(k+1)})
+  \approx\nabla\mathcal{L}(\bm{\theta}^{(k)})
+  \label{eq:md-gradient-approximation}
+\end{equation}
+と近似できる．この置き換えを式\eqref{eq:md-implicit-gradient}に用いて更新を定めると，
+\begin{equation}
+  \bm{\theta}^{(k+1)}=\bm{\theta}^{(k)}
+  -\eta\nabla\mathcal{L}(\bm{\theta}^{(k)})
+  \label{eq:md-gradient-descent}
+\end{equation}
+となる．これが勾配降下法である．
+右辺には更新前の点で計算できる量だけが現れ，陰的な方程式を解く必要がなくなった．
+ここからは，近似によって得た更新先も $\bm{\theta}^{(k+1)}$ と書く．
+
+近接点法の最小化問題で損失そのものを一次近似しても，同じ勾配降下法が得られる．
+現在の勾配を $\bm{g}_k=\nabla\mathcal{L}(\bm{\theta}^{(k)})$，更新量を
+$\bm{\delta}=\bm{u}-\bm{\theta}^{(k)}$ とおくと，
+\begin{equation}
+  \mathcal{L}(\bm{\theta}^{(k)}+\bm{\delta})
+  \approx\mathcal{L}(\bm{\theta}^{(k)})+\bm{g}_k^\top\bm{\delta}
+  \label{eq:md-linear-loss}
+\end{equation}
+となる．式\eqref{eq:md-proximal-point}の損失をこの一次式に置き換え，定数項を省けば，
+\begin{equation}
+  \bm{\delta}_k=\underset{\bm{\delta}}{\operatorname{argmin}}
+  \left\{\bm{g}_k^\top\bm{\delta}
+  +\frac{\lambda}{2}\|\bm{\delta}\|_2^2\right\}
+  \label{eq:md-euclidean-model}
+\end{equation}
+を得る．最小解は $\bm{g}_k+\lambda\bm{\delta}_k=\bm{0}$ を満たすので，
+$\bm{\delta}_k=-\eta\bm{g}_k$ となり，式\eqref{eq:md-gradient-descent}と一致する．
+以後はこの最小化問題を使い，近接項と損失の近似を順に変えていく．
+
+\subsection{距離の取り方の一般化}
+
+式\eqref{eq:md-euclidean-model}では，パラメータの変化をユークリッド距離の二乗で測った．
+同じ大きさの更新でも，方向によって予測の変化量は異なる．
+予測を大きく変えすぎないように更新したいなら，パラメータの数値の差だけでなく，モデルの出力の変化を測る方が目的に合っている．
+
+そこで，更新前後の違いを測る非負の関数 $D(\bm{u},\bm{\theta})$ を使う．
+同じパラメータでは $D(\bm{\theta},\bm{\theta})=0$ とするが，対称性や三角不等式は要求しない．
+このような違いの尺度を，ここではダイバージェンスと呼ぶ\footnote{集合 $\mathcal{X}$ 上のダイバージェンス $D$ は，任意の $x,y\in\mathcal{X}$ に対して，
+\textup{(i)} $D(x,y)\geq 0$，\textup{(ii)} $D(x,x)=0$，\textup{(iii)} $D(x,y)=0$ ならば $x=y$，の3条件を満たす関数である．
+対称性と三角不等式は要求しない．予測分布上のダイバージェンスをパラメータの関数として使う場合には，異なるパラメータが同じ予測分布を表しうるため，パラメータの一致を要求する\textup{(iii)}は課さない．}．
+通常の距離とは異なるが，現在の点から大きく変わる更新を抑える近接項として使える．
+損失の一次近似はそのままにして，更新を
+\begin{equation}
+  \bm{\theta}^{(k+1)}=\underset{\bm{u}}{\operatorname{argmin}}
+  \left\{\bm{g}_k^\top(\bm{u}-\bm{\theta}^{(k)})
+  +\lambda D(\bm{u},\bm{\theta}^{(k)})\right\}
+  \label{eq:md-general-proximity}
+\end{equation}
+と定める．$D(\bm{u},\bm{\theta})=\tfrac12\|\bm{u}-\bm{\theta}\|_2^2$ と選べば，前項の勾配降下法に戻る．
+ここでは，モデルの予測分布の変化を測るために，KLダイバージェンスを選ぶ．
+
+たとえば，分類モデルが入力 $\bm{x}$ に対してクラス $y$ の確率 $p_{\bm{\theta}}(y\mid\bm{x})$ を出力するとする．
+更新前と更新後のモデルがほぼ同じ確率分布を出力するなら，パラメータの値が異なっていても，予測の変化は小さいと考えたい．
+この目的には，確率分布同士の違いを測るKLダイバージェンスを使える．
+有限個のクラス上の正の確率分布 $p,q$ に対し，
+\begin{equation}
+  D_{\mathrm{KL}}(p\|q)=\sum_y p(y)\log\frac{p(y)}{q(y)}
+  \label{eq:md-kl-definition}
+\end{equation}
+と定義する\footnote{情報理論では，$p$ に従うデータを $q$ に基づいて符号化するとき，$p$ に基づく場合よりも余分に必要になる平均符号長として解釈できる\cite{watanabe2012bayes}．
+$p$ はデータを生成する分布，$q$ は符号化に使う分布なので，両者の役割は対称ではない．
+統計の言葉では，同じ量は，$p$ を使う場合に比べた $q$ の平均対数尤度の低下を表す．
+したがって，$p$ を固定してKLダイバージェンスを最小にすることは，モデル $q$ の対数尤度の平均を最大にすることに等しい\cite{akaike1980entropy}．}．この値は非負であり，二つの分布が一致するときにゼロになる．
+一般には $D_{\mathrm{KL}}(p\|q)\ne D_{\mathrm{KL}}(q\|p)$ なので，どちらの分布を基準にするかも指定する必要がある．
+
+ここでは，更新前の予測分布を基準にして，
+\begin{equation}
+  D(\bm{u},\bm{\theta}^{(k)})
+  =\mathbb{E}_{\bm{x}\sim\mu}
+  \left[D_{\mathrm{KL}}\bigl(
+  p_{\bm{\theta}^{(k)}}(\cdot\mid\bm{x})
+  \|p_{\bm{u}}(\cdot\mid\bm{x})\bigr)\right]
+  \label{eq:md-predictive-kl}
+\end{equation}
+と選ぶ．$\mu$ は入力をどの重みで平均するかを定める固定の分布であり，たとえば訓練入力上の経験分布を使う．
+この近接項は，入力ごとの予測確率が大きく変わる更新を抑える．
+損失が正解ラベルに対して予測を改善する役割を持つのに対し，近接項は更新前の予測からの変化を制御する．
+異なるパラメータが同じ予測分布を表すこともあるので，この $D$ はパラメータが異なっていてもゼロになりうる．
+
+このKLダイバージェンスを使って，更新をどう計算すればよいだろうか．
+式\eqref{eq:md-predictive-kl}のKLダイバージェンスを現在の点のまわりで二次近似するため，
+$\bm{u}$ についてのヘッセ行列を $\bm{F}:=\nabla_1^2D(\bm{\theta}^{(k)},\bm{\theta}^{(k)})$ と書く\footnote{$\mu$ は有限個の入力上の分布とし，各予測確率は正で，パラメータについて二階連続微分可能であると仮定する．現在の点 $\bm{\theta}^{(k)}$ はパラメータの定義域の内点とする．}．
+式\eqref{eq:md-predictive-kl}を $\bm{u}$ で二回微分し，$\bm{u}=\bm{\theta}^{(k)}$ とおくと，
+\begin{equation}
+  \bm{F}=\mathbb{E}_{\bm{x}\sim\mu}
+  \left[\sum_y p_{\bm{\theta}^{(k)}}(y\mid\bm{x})
+  \bm{s}_k(y,\bm{x})\bm{s}_k(y,\bm{x})^\top\right],
+  \quad
+  \bm{s}_k(y,\bm{x})
+  :=\left.\nabla_{\bm{\theta}}\log p_{\bm{\theta}}(y\mid\bm{x})
+  \right|_{\bm{\theta}=\bm{\theta}^{(k)}}
+  \label{eq:md-kl-fisher}
+\end{equation}
+となる．この等式には，$\sum_y p_{\bm{\theta}}(y\mid\bm{x})=1$ を二回微分するとゼロになることを用いた．
+この $\bm{F}$ はフィッシャー情報行列であり，予測分布が各パラメータ方向にどれだけ変わるかを表す\footnote{フィッシャー情報行列は，もともとパラメータの推定精度を表す量として導入された．
+正則なモデルでは，標本数が十分に大きいとき，最尤推定量の共分散は，標本数とフィッシャー情報行列の積の逆行列で近似される．
+同じ行列が，近い予測分布を区別する尺度と，パラメータの推定精度の両方に現れる\cite{akaike1980entropy}．}．
+
+この行列を使って，KLダイバージェンスを二次まで展開する．
+$D(\bm{u},\bm{\theta}^{(k)})$ は $\bm{u}=\bm{\theta}^{(k)}$ で最小値ゼロをとるため，その点での値と勾配がゼロになる．
+したがって，テイラー展開では二次の項が最初に残り，
+\begin{equation}
+  D(\bm{\theta}^{(k)}+\bm{\delta},\bm{\theta}^{(k)})
+  =\frac12\bm{\delta}^\top\bm{F}\bm{\delta}
+  +o(\|\bm{\delta}\|_2^2)
+  \label{eq:md-kl-local}
+\end{equation}
+を得る．$\bm{F}$ の固有値が大きい方向ほど，同じ大きさの更新に対してKLダイバージェンスが大きく増える．
+予測の変化をKLダイバージェンスで測るという選択から，近接項の行列がフィッシャー情報行列に定まった．
+
+ここからは，$\bm{F}$ が正定値であると仮定して更新を求める．
+フィッシャー情報行列は一般には半正定値にとどまり，特異になりうる\footnote{統計科学における情報量規準の文脈では，正則モデルと特異モデルの区別が重要である．
+正則性を前提に導かれるAICに対し，WAIC（広く使える情報量規準）は，特異モデルでもベイズ予測の汎化損失を推定できる情報量規準である\cite{watanabe2012bayes}．}．
+その場合には，たとえば $\bm{F}+\gamma\bm{I}$（$\gamma>0$）を用いて近接項にユークリッド距離の二乗を補う．
+この補正をdampingと呼ぶ．その意味は，\ref{subsec:md-damping}項のコラムで説明する．
+式\eqref{eq:md-general-proximity}のKLダイバージェンスを式\eqref{eq:md-kl-local}で二次近似すると，
+\begin{equation}
+  \bm{\delta}_k=\underset{\bm{\delta}}{\operatorname{argmin}}
+  \left\{\bm{g}_k^\top\bm{\delta}
+  +\frac{\lambda}{2}\bm{\delta}^\top\bm{F}\bm{\delta}\right\}
+  \label{eq:md-metric-model}
+\end{equation}
+となる．微分してゼロとおけば $\bm{g}_k+\lambda\bm{F}\bm{\delta}_k=\bm{0}$ なので，$\eta=1/\lambda$ を用いて
+\begin{equation}
+  \bm{\theta}^{(k+1)}=\bm{\theta}^{(k)}
+  -\eta\bm{F}^{-1}\nabla\mathcal{L}(\bm{\theta}^{(k)})
+  \label{eq:md-preconditioned-update}
+\end{equation}
+を得る．勾配に掛かる $\bm{F}^{-1}$ を前処理行列，$\bm{F}^{-1}\nabla\mathcal{L}$ を前処理勾配と呼ぶ．
+KLダイバージェンスが大きく増える方向の更新を抑えるため，その曲率を表すフィッシャー情報行列 $\bm{F}$ の逆行列が掛かる．
+この更新を自然勾配法と呼ぶ．
+
+$\bm{F}$ は更新前のパラメータ $\bm{\theta}^{(k)}$ で計算し，1回の最小化を行う間は固定する．
+
+\subsection{損失の二次近似}
+
+ここまでは，損失を一次近似し，KLダイバージェンスを二次近似して更新量を決めた．
+損失の曲率も使うには，損失の局所モデルにも二次の項を残せばよい．
+これは，損失を一次近似して得た局所最小化問題の拡張である．
+損失のヘッセ行列を $\bm{H}:=\nabla^2\mathcal{L}(\bm{\theta}^{(k)})$ とおく\footnote{$\mathcal{L}$ は現在の点の近傍で二階連続微分可能であると仮定する．}．
+このとき，損失の二次近似は
+\begin{equation}
+  \mathcal{L}(\bm{\theta}^{(k)}+\bm{\delta})
+  \approx \mathcal{L}(\bm{\theta}^{(k)})+\nabla \mathcal{L}(\bm{\theta}^{(k)})^\top\bm{\delta}
+  +\frac12\bm{\delta}^\top \bm{H}\bm{\delta}
+\end{equation}
+となる．近接項には，これまでと同じ $\lambda\bm{\delta}^\top \bm{F}\bm{\delta}/2$ を用いる．
+損失の近似式にこの近接項を加え，更新量に依存しない定数項を省くと，
+\begin{align}
+  \bm{\delta}_k
+  &=\underset{\bm{\delta}}{\operatorname{argmin}}
+  \left\{\nabla \mathcal{L}(\bm{\theta}^{(k)})^\top\bm{\delta}
+  +\frac12\bm{\delta}^\top \bm{H}\bm{\delta}
+  +\frac{\lambda}{2}\bm{\delta}^\top \bm{F}\bm{\delta}\right\}\notag\\
+  &=\underset{\bm{\delta}}{\operatorname{argmin}}
+  \left\{\nabla \mathcal{L}(\bm{\theta}^{(k)})^\top\bm{\delta}
+  +\frac12\bm{\delta}^\top(\bm{H}+\lambda \bm{F})\bm{\delta}\right\}
+  \label{eq:md-second-order-model}
+\end{align}
+を得る．損失の曲率による項と，近接項が加わり，行列 $\bm{H}+\lambda \bm{F}$ が現れた．
+
+$\bm{H}+\lambda \bm{F}$ が正定値であると仮定する．
+式\eqref{eq:md-second-order-model}を $\bm{\delta}$ で微分すると，最小解は
+\begin{equation}
+  \nabla \mathcal{L}(\bm{\theta}^{(k)})+(\bm{H}+\lambda \bm{F})\bm{\delta}_k=\bm{0}
+\end{equation}
+を満たす．これを解き，$\bm{\theta}^{(k+1)}=\bm{\theta}^{(k)}+\bm{\delta}_k$ に代入すると，
+\begin{equation}
+  \bm{\theta}^{(k+1)}
+  =\bm{\theta}^{(k)}-(\bm{H}+\lambda \bm{F})^{-1}\nabla \mathcal{L}(\bm{\theta}^{(k)})
+  \label{eq:md-second-order-update}
+\end{equation}
+となる．この式も，二次近似した問題の最小解を与える式である．
+$\bm{H}$ は損失のヘッセ行列，$\bm{F}$ はKLダイバージェンスのヘッセ行列であるフィッシャー情報行列である．
+損失と近接項に由来する二つの行列が加わり，その逆行列が勾配の前処理に使われている．
+
+$\bm{H}$ が正定値なら，$\lambda$ をゼロに近づけた極限でニュートン法の更新を得る．
+$\bm{H}$ に負の固有値がある場合も，$\bm{F}$ が正定値なら，$\lambda$ を十分大きく選ぶことで $\bm{H}+\lambda \bm{F}$ を正定値にできる．
+
+\subsection{Fisher情報行列とHessianの関係}
+\label{subsec:md-fisher-hessian}
+
+損失のヘッセ行列 $\bm{H}$ と，予測分布の変化を測るフィッシャー情報行列 $\bm{F}$ は，異なる目的から現れた．
+しかし，ニューラルネットワークでよく使う損失では，$\bm{H}$ のGauss--Newton近似が $\bm{F}$ と一致する．
+その関係を見るため，パラメータから出力への写像と，出力から損失への写像を分けて考える\cite{grosse2021metrics,grosse2021secondorder}．
+
+ネットワークの出力を $\bm{z}=\bm{f}_{\bm{\theta}}(\bm{x})\in\mathbb{R}^c$，出力に対する損失を $\ell(y,\bm{z})$ とし，
+データの分布 $q$ について
+\begin{equation}
+  \mathcal{L}(\bm{\theta})
+  =\mathbb{E}_{(\bm{x},y)\sim q}
+  [\ell(y,\bm{f}_{\bm{\theta}}(\bm{x}))]
+  \label{eq:md-composite-loss}
+\end{equation}
+と書く．$q$ の入力についての周辺分布は，KL近接項で使う $\mu$ と同じものとする．
+以下では，すべての微分を現在のパラメータ $\bm{\theta}^{(k)}$ と，それに対応する出力で評価する．
+出力のヤコビ行列を $\bm{J}(\bm{x}):=\partial\bm{f}_{\bm{\theta}}(\bm{x})/\partial\bm{\theta}\in\mathbb{R}^{c\times d}$，
+出力に関する損失のヘッセ行列を $\bm{H}_{\bm{z}}(y,\bm{x}):=\nabla_{\bm{z}}^2\ell(y,\bm{z})$ と書く．
+合成関数の微分を二回行うと，パラメータに関するヘッセ行列は
+\begin{equation}
+  \bm{H}
+  =\underbrace{\mathbb{E}_{q}
+  [\bm{J}(\bm{x})^\top\bm{H}_{\bm{z}}(y,\bm{x})\bm{J}(\bm{x})]}_{\displaystyle\bm{G}}
+  +\mathbb{E}_{q}\left[
+    \sum_{a=1}^c\frac{\partial\ell}{\partial z_a}
+    \nabla_{\bm{\theta}}^2 f_{\bm{\theta},a}(\bm{x})\right]
+  \label{eq:md-hessian-decomposition}
+\end{equation}
+となる\footnote{微分と分布 $q$ に関する平均を交換できると仮定する．}．
+第1項は，出力に対する損失の曲率を，ヤコビ行列でパラメータの空間に移したものである．
+第2項には，ネットワークの出力そのものの二階微分が含まれている．
+
+ここで，出力を $\bm{f}_{\bm{\theta}^{(k)}+\bm{\delta}}(\bm{x})
+\approx\bm{f}_{\bm{\theta}^{(k)}}(\bm{x})+\bm{J}(\bm{x})\bm{\delta}$ と一次近似する．
+この近似では出力の二階微分がゼロになるため，損失の曲率は式\eqref{eq:md-hessian-decomposition}の第1項 $\bm{G}$ で表される．
+この $\bm{G}$ をGauss--Newton行列と呼び，$\bm{H}$ を $\bm{G}$ で置き換えることをGauss--Newton近似と呼ぶ\footnote{二乗損失に対するものをGauss--Newton近似，一般の損失に対するものを一般化Gauss--Newton近似と呼び分けることもある．ここでは両者をまとめて扱う．}．
+損失が出力 $\bm{z}$ について凸なら，$\bm{H}_{\bm{z}}$ は半正定値なので，$\bm{G}$ も半正定値になる．
+ネットワークの非線形性によって $\bm{H}$ が負の固有値を持つ場合にも，$\bm{G}$ は近接項と組み合わせやすい曲率の近似になる．
+
+次に，この $\bm{G}$ をフィッシャー情報行列と比較する．
+出力 $\bm{z}$ が予測分布 $p(y\mid\bm{z})$ を定め，$p_{\bm{\theta}}(y\mid\bm{x})=p(y\mid\bm{f}_{\bm{\theta}}(\bm{x}))$ と書けるとする．
+出力に関するフィッシャー情報行列を
+\begin{equation}
+  \bm{F}_{\bm{z}}(\bm{x})
+  :=\mathbb{E}_{y\sim p_{\bm{\theta}^{(k)}}(\cdot\mid\bm{x})}
+  \left[\nabla_{\bm{z}}\log p(y\mid\bm{z})
+  \nabla_{\bm{z}}\log p(y\mid\bm{z})^\top\right]
+  \label{eq:md-output-fisher}
+\end{equation}
+とすると，連鎖律から，パラメータに関する行列は
+\begin{equation}
+  \bm{F}=\mathbb{E}_{\bm{x}\sim\mu}
+  [\bm{J}(\bm{x})^\top\bm{F}_{\bm{z}}(\bm{x})\bm{J}(\bm{x})]
+  \label{eq:md-fisher-pullback}
+\end{equation}
+となる．$\bm{G}$ と $\bm{F}$ は，出力の空間で使う曲率がそれぞれ $\bm{H}_{\bm{z}}$ と $\bm{F}_{\bm{z}}$ であるという違いを持つ．
+
+たとえば，分類モデルの出力 $\bm{z}$ をlogitとし，softmaxで得た確率ベクトルを $\bm{p}$ とする．
+交差エントロピー損失 $\ell(y,\bm{z})=-\log p_y$ をlogitで二回微分すると，
+\begin{equation}
+  \bm{H}_{\bm{z}}(y,\bm{x})
+  =\operatorname{diag}(\bm{p})-\bm{p}\bm{p}^\top
+  =\bm{F}_{\bm{z}}(\bm{x})
+  \label{eq:md-softmax-fisher-gn}
+\end{equation}
+を得る．この行列は正解ラベル $y$ に依存しないので，データのラベルで平均してもモデルの予測分布で平均しても同じ行列になる．
+したがって，この場合には $\bm{G}=\bm{F}$ が成り立つ．
+分散を固定した正規分布の平均をネットワークが出力し，負の対数尤度を二乗損失として使う回帰でも，同じ一致が成り立つ．
+より一般には，出力を指数型分布の自然パラメータとし，負の対数尤度を損失に選ぶと，出力についてのヘッセ行列がラベルに依存せず，$\bm{F}_{\bm{z}}$ と一致する\cite{grosse2021metrics}．
+
+この一致により，フィッシャー情報行列は，予測分布の変化を測る行列であると同時に，損失のGauss--Newton近似としても理解できる．
+式\eqref{eq:md-second-order-model}でも，$\bm{H}$ を $\bm{G}=\bm{F}$ で近似すれば，曲率と近接項の和は $(1+\lambda)\bm{F}$ となり，自然勾配と同じ方向の更新が得られる．
+
+\subsection{指数移動平均での推定}
+\label{subsec:md-ema-estimation}
+
+ここまでの更新では，フィッシャー情報行列が得られるとして議論を進めた．
+実際の学習では，データからこの行列を推定する．
+式\eqref{eq:md-kl-fisher}のフィッシャー情報行列は，入力分布 $\mu$ と，現在のモデルの予測分布について平均した行列である．
+$\mu$ を入力の真の分布とすれば，現在のミニバッチから計算する行列は，この分布全体での平均に対する標本近似になる．
+そこで，パラメータの変化が緩やかなときには，ミニバッチごとの推定値を指数移動平均することも，複数のミニバッチを通じてこの平均を近似する方法と捉えられる\cite{martens2020natural,urettini2025ocar}．
+指数移動平均は，最近の情報に重みを置きながら，現在の標本だけで決まる前処理を分布全体に基づく前処理へ近づける役割を持つ．
+
+\subsection{dampingの役割}
+\label{subsec:md-damping}
+
+フィッシャー情報行列 $\bm{F}$ に $\gamma\bm{I}$ を加えるdampingには，いくつかの見方がある．
+ここでは現在の点での $\bm{F}$ と勾配 $\bm{g}=\nabla\mathcal{L}(\bm{\theta})$ を使い，
+損失を一次近似した場合の更新量
+\begin{equation}
+  \bm{\delta}_\gamma=-\eta(\bm{F}+\gamma\bm{I})^{-1}\bm{g},
+  \qquad\gamma>0
+  \label{eq:md-damped-update}
+\end{equation}
+について考える．$\bm{F}$ 自体は，これまでと同じKLダイバージェンスのヘッセ行列である．
+
+まず，数値計算の安定性という理由がある．
+この更新は，連立一次方程式 $(\bm{F}+\gamma\bm{I})\bm{\delta}_\gamma=-\eta\bm{g}$ を解いて求められる．
+その際，行列の成分や勾配に含まれる小さな誤差が，解では大きくなることがある．
+$\bm{F}$ の最大・最小固有値を $\nu_{\max},\nu_{\min}$（$\nu_{\min}\geq0$）とすると，
+誤差の増幅を評価する2ノルムの条件数は
+\begin{equation}
+  \kappa_2(\bm{F}+\gamma\bm{I})
+  =\frac{\nu_{\max}+\gamma}{\nu_{\min}+\gamma}
+  \label{eq:md-damped-condition}
+\end{equation}
+である．固有値の比が大きいほど，解が摂動に敏感になる．
+安定な解法を使っても，丸め誤差による解の相対誤差の上界は，概ねこの条件数と計算精度 $\varepsilon_{\mathrm{mach}}$ の積に比例する\cite{intel2026error}．
+したがって，条件数が大きすぎると，計算結果の精度を保てないことがある．
+$\gamma$ を加えると最小固有値も $\nu_{\min}+\gamma$ となり，この誤差増幅を抑えられる．
+
+条件数を $\bar\kappa>1$ 以下にしたいなら，式\eqref{eq:md-damped-condition}を解いて
+\begin{equation}
+  \gamma\geq\max\left\{0,
+  \frac{\nu_{\max}-\bar\kappa\nu_{\min}}{\bar\kappa-1}\right\}
+  \label{eq:md-damping-threshold}
+\end{equation}
+とすればよい．許容する $\bar\kappa$ は計算精度と要求する解の精度によって変わり，必要な $\gamma$ は固有値の大きさにも依存する．
+同じ条件数の行列でも，行列全体を定数倍すれば，必要な $\gamma$ も同じ定数倍になる．
+
+次に，近接項による正則化としても説明できる．
+予測分布の変化を測るKLダイバージェンス $D$ に，パラメータの移動を抑える項を加えて，
+\begin{equation}
+  D_\gamma(\bm{u},\bm{\theta})
+  :=D(\bm{u},\bm{\theta})
+  +\frac{\gamma}{2}\|\bm{u}-\bm{\theta}\|_2^2
+  \label{eq:md-damped-divergence}
+\end{equation}
+とする．ここで $D$ は式\eqref{eq:md-predictive-kl}の入力について平均したKLである．
+KLの変化が小さくても，パラメータが大きく動けば，第2項が増える．
+この項を加えることで，予測分布の変化とパラメータの移動量の両方を抑える．
+$D$ を二次近似し，$\lambda=1/\eta$ を用いれば，局所最小化問題は
+\begin{equation}
+  \bm{\delta}_\gamma
+  =\underset{\bm{\delta}}{\operatorname{argmin}}
+  \left\{\bm{g}^\top\bm{\delta}
+  +\frac{1}{2\eta}\bm{\delta}^\top\bm{F}\bm{\delta}
+  +\frac{\gamma}{2\eta}\|\bm{\delta}\|_2^2\right\}
+  \label{eq:md-damped-proximal-model}
+\end{equation}
+となる．停留条件は $\bm{g}+\eta^{-1}(\bm{F}+\gamma\bm{I})\bm{\delta}_\gamma=\bm{0}$ なので，
+式\eqref{eq:md-damped-update}が得られる．
+これは更新量に対する二乗ノルムの正則化であり，局所近似を使う範囲を制限する意味も持つ\cite{martens2020natural}．
+
+最後に，dampingが小さい固有値方向での勾配ノイズの増幅を抑えることを示す．
+ここでは現在のパラメータと $\bm{F}$ を固定し，勾配だけにノイズがある場合を考える．
+観測する勾配を $\widehat{\bm{g}}=\bm{g}+\bm{\xi}$，$\mathbb{E}[\bm{\xi}]=\bm{0}$ とする．
+$\bm{F}$ の正規直交固有ベクトルを $\bm{u}_i$，対応する固有値を $\nu_i\geq0$ とし，
+$\xi_i:=\bm{u}_i^\top\bm{\xi}$ と書けば，その方向の更新量は
+\begin{equation}
+  \bm{u}_i^\top\widehat{\bm{\delta}}_\gamma
+  =-\frac{\eta\,\bm{u}_i^\top\bm{g}}{\nu_i+\gamma}
+  -\frac{\eta\,\xi_i}{\nu_i+\gamma}
+  \label{eq:md-damped-noisy-direction}
+\end{equation}
+である．$\mathbb{E}[\xi_i^2]=\sigma_i^2$ とおくと，更新量のこの成分の分散は
+$\eta^2\sigma_i^2/(\nu_i+\gamma)^2$ となる．
+$\nu_i>0$ の方向でdampingなしと比べれば，分散は $(\nu_i/(\nu_i+\gamma))^2$ 倍になる．
+したがって，同じ学習率なら，小さい固有値方向でのノイズの増幅を強く抑えられる．
+固有値がゼロの方向でも，増幅率は $\eta/\gamma$ に抑えられる．
+
+\section{近接ノルムの一般化}
+\label{sec:md-proximal-norms}
+
+勾配降下法を導いた式\eqref{eq:md-euclidean-model}では，更新量の大きさをユークリッドノルムで測った．
+各成分の変化の二乗を足し合わせる代わりに，最も大きく変わる成分を抑えたい場合には，別のノルムを選ぶ方が自然である．
+また，パラメータが行列なら，その行列が入力に及ぼす作用から更新量の大きさを定めることもできる．
+
+そこで，損失は一次近似したまま，近接項のノルムを一般化して
+\begin{equation}
+  \bm{\delta}_k\in\underset{\bm{\delta}}{\operatorname{argmin}}
+  \left\{\bm{g}_k^\top\bm{\delta}
+  +\frac{\lambda}{2}\|\bm{\delta}\|^2\right\},
+  \qquad\lambda>0
+  \label{eq:md-norm-model}
+\end{equation}
+を考える．$\bm{g}_k=\nabla\mathcal{L}(\bm{\theta}^{(k)})$ と
+$\bm{\theta}^{(k+1)}=\bm{\theta}^{(k)}+\bm{\delta}_k$ は，これまでと同じである．
+ここでは最小解の一つを選ぶため，$\in$ を使った．
+これは式\eqref{eq:md-general-proximity}で
+$D(\bm{u},\bm{\theta})=\tfrac12\|\bm{u}-\bm{\theta}\|^2$ と選ぶことにあたる．
+以下では，更新量の大きさを固定して方向を求め，その後で大きさを決める\cite{bernstein2024norm}．
+
+\subsection{signGD}
+
+各成分の変化を同じ上限で抑えるには，最大ノルム
+$\|\bm{\delta}\|_\infty:=\max_i|\delta_i|$ を使えばよい．
+$\|\bm{\delta}\|_\infty\leq\rho$ は，すべての成分が $|\delta_i|\leq\rho$ を満たすことを意味する．
+この範囲で損失の一次近似を最も小さくするには，各成分を勾配と逆の符号へ動かせばよい．
+実際，$g_{k,i}$ を $\bm{g}_k$ の第 $i$ 成分とすると，
+\begin{equation}
+  \bm{g}_k^\top\bm{\delta}
+  =\sum_i g_{k,i}\delta_i
+  \geq-\rho\sum_i|g_{k,i}|
+  =-\rho\|\bm{g}_k\|_1
+  \label{eq:md-sign-direction}
+\end{equation}
+であり，$\delta_i=-\rho\operatorname{sign}(g_{k,i})$ と選べば等号が成り立つ．
+ここで $\operatorname{sign}(a)$ は，$a>0$ なら $1$，$a<0$ なら $-1$，$a=0$ なら $0$ とする．
+勾配がゼロの成分は，動かしても一次近似の値が変わらないので，更新しないことにした．
+
+$\bm{g}_k\ne\bm{0}$ とし，この方向に沿って更新量を決める．
+式\eqref{eq:md-norm-model}の最小化は，$\rho\geq0$ について
+$-\rho\|\bm{g}_k\|_1+\lambda\rho^2/2$ を最小化する問題に帰着する．
+その解は $\rho=\|\bm{g}_k\|_1/\lambda$ なので，最小解の一つは
+\begin{equation}
+  \bm{\delta}_k
+  =-\frac{\|\bm{g}_k\|_1}{\lambda}
+  \operatorname{sign}(\bm{g}_k)
+  \label{eq:md-sign-proximal-solution}
+\end{equation}
+である．$\operatorname{sign}$ はベクトルの各成分に作用させる．
+ユークリッドノルムを使ったときには勾配に比例する更新が得られたが，最大ノルムでは勾配の符号で方向が決まる．
+
+この方向への更新の大きさを学習率 $\eta>0$ で指定する方法を，signGDと呼ぶ．
+更新式は
+\begin{equation}
+  \bm{\theta}^{(k+1)}
+  =\bm{\theta}^{(k)}-\eta\operatorname{sign}(\bm{g}_k)
+  \label{eq:md-sign-gd}
+\end{equation}
+となる．勾配がゼロでない成分は，勾配の絶対値によらず，同じ大きさ $\eta$ だけ動く．
+式\eqref{eq:md-sign-proximal-solution}との対応は
+$\lambda=\|\bm{g}_k\|_1/\eta$ である．
+前節の勾配降下法では $\eta=1/\lambda$ とおいたが，符号だけを残した方向を使う場合には，勾配の大きさもこの対応に入る．
+$\eta$ を一定に保つなら，近接項の係数 $\lambda$ を反復ごとに選び直すことになる．
+$\bm{g}_k=\bm{0}$ の場合は，任意の $\lambda>0$ に対して最小解は $\bm{\delta}_k=\bm{0}$ であり，signGDでも更新しない．
+
+\subsection{SpectralGDとMuon}
+\label{subsec:md-muon}
+
+次に，一つの線形層のパラメータを考える．
+これまでは全成分をベクトルに並べていたが，ここからは行列の形を保ち，
+$\bm{W}_\ell^{(k)}\in\mathbb{R}^{m\times n}$ と書く．
+以下では層 $\ell$ を固定し，勾配を $\bm{g}_k=\nabla_{\bm{W}_\ell}\mathcal{L}$ と書く．
+勾配 $\bm{g}_k$ と更新量 $\bm{\delta}$ も同じ形の行列とする．
+記号の意味は変えず，勾配の各成分は
+$(\bm{g}_k)_{ij}=\partial\mathcal{L}/\partial(W_\ell)_{ij}$ を現在の点で評価したものとする．
+ベクトルでの内積に対応するのは，成分ごとの積を足した
+$\langle\bm{g}_k,\bm{\delta}\rangle_{\mathrm F}
+:=\operatorname{Tr}(\bm{g}_k^\top\bm{\delta})$ であり，損失の一次近似は
+\begin{equation}
+  \mathcal{L}(\bm{W}_\ell^{(k)}+\bm{\delta})
+  \approx\mathcal{L}(\bm{W}_\ell^{(k)})
+  +\langle\bm{g}_k,\bm{\delta}\rangle_{\mathrm F}
+  \label{eq:md-matrix-linear-loss}
+\end{equation}
+となる．
+
+この層の出力が $\bm{W}_\ell\bm{x}$ なら，更新による出力の変化は $\bm{\delta}\bm{x}$ である．
+入力の向きによらず出力の変化を抑えるには，単位長さの入力に対する変化の最大値を測ればよい．
+それがスペクトルノルム
+\begin{equation}
+  \|\bm{\delta}\|_{\mathrm{op}}
+  :=\max_{\|\bm{x}\|_2=1}\|\bm{\delta}\bm{x}\|_2
+  \label{eq:md-spectral-norm}
+\end{equation}
+であり，行列の最大特異値に等しい．
+この定義から，任意の入力に対して
+$\|\bm{\delta}\bm{x}\|_2\leq\|\bm{\delta}\|_{\mathrm{op}}\|\bm{x}\|_2$ が成り立つ．
+したがって，このノルムを小さく保つと，入力の大きさに対する出力の変化を抑えられる．
+
+近接項にスペクトルノルムを使い，
+\begin{equation}
+  \bm{\delta}_k\in\underset{\bm{\delta}}{\operatorname{argmin}}
+  \left\{\langle\bm{g}_k,\bm{\delta}\rangle_{\mathrm F}
+  +\frac{\lambda}{2}\|\bm{\delta}\|_{\mathrm{op}}^2\right\}
+  \label{eq:md-spectral-model}
+\end{equation}
+を解く．勾配行列がゼロでないとし，その階数を $r$ とする．
+正の特異値だけを残した特異値分解を
+$\bm{g}_k=\bm{U}_k\bm{\Sigma}_k\bm{V}_k^\top$ と書く．
+$\bm{U}_k\in\mathbb{R}^{m\times r}$ と $\bm{V}_k\in\mathbb{R}^{n\times r}$ の列はそれぞれ正規直交し，
+$\bm{\Sigma}_k=\operatorname{diag}(\sigma_{k,1},\ldots,\sigma_{k,r})$ の対角成分は正である．
+
+signGDと同じように，まずノルムを $\rho$ 以下に制限する．
+$\bm{U}_k,\bm{V}_k$ の第 $i$ 列を $\bm{u}_{k,i},\bm{v}_{k,i}$ と書くと，
+$\|\bm{\delta}\|_{\mathrm{op}}\leq\rho$ より
+$\bm{u}_{k,i}^\top\bm{\delta}\bm{v}_{k,i}\geq-\rho$ である．したがって，
+\begin{equation}
+  \langle\bm{g}_k,\bm{\delta}\rangle_{\mathrm F}
+  =\sum_{i=1}^r\sigma_{k,i}
+  \bm{u}_{k,i}^\top\bm{\delta}\bm{v}_{k,i}
+  \geq-\rho\sum_{i=1}^r\sigma_{k,i}
+  \label{eq:md-spectral-direction}
+\end{equation}
+となる．$\bm{\delta}=-\rho\bm{U}_k\bm{V}_k^\top$ と選ぶと，ノルムは $\rho$ で，この不等式の等号が成り立つ．
+特異値の和を $\|\bm{g}_k\|_*:=\sum_i\sigma_{k,i}$ と書けば，残るのは
+$-\rho\|\bm{g}_k\|_*+\lambda\rho^2/2$ の最小化である．
+よって，式\eqref{eq:md-spectral-model}の最小解の一つは
+\begin{equation}
+  \bm{\delta}_k
+  =-\frac{\|\bm{g}_k\|_*}{\lambda}\bm{U}_k\bm{V}_k^\top
+  \label{eq:md-spectral-proximal-solution}
+\end{equation}
+と求まる．特異値の和 $\|\bm{g}_k\|_*$ は，核ノルムと呼ばれる．
+
+この方向に学習率 $\eta$ で進む更新がSpectralGDである．すなわち，
+\begin{equation}
+  \bm{W}_\ell^{(k+1)}
+  =\bm{W}_\ell^{(k)}-\eta\bm{U}_k\bm{V}_k^\top
+  \label{eq:md-spectral-gd}
+\end{equation}
+とする．式\eqref{eq:md-spectral-proximal-solution}との対応は
+$\lambda=\|\bm{g}_k\|_*/\eta$ である．
+通常の勾配降下法が $-\eta\bm{U}_k\bm{\Sigma}_k\bm{V}_k^\top$ を加えるのに対し，
+SpectralGDでは正の特異値をすべて $1$ に置き換えた方向を使う．
+signGDが各成分の絶対値をそろえたのに対応して，ここでは特異値方向ごとの更新の大きさをそろえている．
+階数が不足している場合にも，上の式は最小解の一つを与える．
+勾配がゼロの特異値方向には更新を加えず，$\bm{g}_k=\bm{0}$ なら更新量をゼロとする．
+
+この特異値をそろえる操作を，momentumから作った更新方向に適用する方法がMuonである\cite{jordan2024muon}．
+現在の勾配だけで方向を決める代わりに，過去の勾配も平均してから，同じ操作を行う．
+その基本形を，momentum行列 $\bm{M}_k$ を用いて表す．
+初期値を $\bm{M}_{-1}=\bm{0}$ とし，$0\leq\beta<1$ に対して
+\begin{equation}
+  \bm{M}_k=\beta\bm{M}_{k-1}+(1-\beta)\bm{g}_k
+  \label{eq:md-muon-momentum}
+\end{equation}
+とする．$\beta$ が大きいほど，過去の勾配を長く残す．
+正の特異値だけを残した分解を
+$\bm{M}_k=\widetilde{\bm{U}}_k\widetilde{\bm{\Sigma}}_k\widetilde{\bm{V}}_k^\top$ と書くと，
+直交化を厳密に行う場合の更新は
+\begin{equation}
+  \bm{W}_\ell^{(k+1)}
+  =\bm{W}_\ell^{(k)}-\eta\widetilde{\bm{U}}_k\widetilde{\bm{V}}_k^\top
+  \label{eq:md-muon-update}
+\end{equation}
+である．$\bm{M}_k=\bm{0}$ の場合には更新しない．
+$\beta=0$ なら $\bm{M}_k=\bm{g}_k$ となり，式\eqref{eq:md-spectral-gd}のSpectralGDに戻る．
+つまり，momentumを使わないMuonの基本となる更新方向は，スペクトルノルムを近接項に選ぶことで得られる．
+
+実際のMuonでは，特異値分解の代わりに，行列積で計算できるNewton--Schulz反復を使ってこの操作を近似する．
+この操作は，基本となる三次の反復で説明できる\cite{bernstein2024norm}．
+一回の更新に使う $\bm{M}_k\ne\bm{0}$ を固定し，学習の反復回数 $k$ と区別して，行列計算の反復回数を $r$ と書く．
+初期値を $\bm{X}_0=\bm{M}_k/\|\bm{M}_k\|_{\mathrm F}$ とし，
+\begin{equation}
+  \bm{X}_{r+1}
+  =\frac32\bm{X}_r-\frac12\bm{X}_r\bm{X}_r^\top\bm{X}_r
+  \label{eq:md-newton-schulz}
+\end{equation}
+を繰り返す．フロベニウスノルムによる規格化で，初期の特異値はすべて $0$ 以上 $1$ 以下になる．
+この反復は特異ベクトルを変えず，各特異値に対して
+\begin{equation}
+  \sigma_{r+1}=\frac32\sigma_r-\frac12\sigma_r^3
+  \label{eq:md-newton-schulz-scalar}
+\end{equation}
+を適用する．$0<\sigma_r<1$ では $\sigma_r<\sigma_{r+1}\leq1$ となるので，正の特異値は $1$ に近づき，ゼロの特異値はゼロのまま残る．
+したがって，
+\begin{equation}
+  \bm{X}_r\longrightarrow
+  \widetilde{\bm{U}}_k\widetilde{\bm{V}}_k^\top
+  =:\operatorname{msign}(\bm{M}_k)
+  \label{eq:md-matrix-sign-limit}
+\end{equation}
+となり，Muonの更新方向が得られる．右辺は，特異値に符号関数を適用する意味での行列符号関数であり，極分解の極因子とも呼ばれる\cite{eschenhagen2026clarifying}．
+
+第3章では，AdaGradの二次統計を近似する問題から，同じ更新方向が現れることを調べる．
+
+\subsection{Shampoo}
+
+SpectralGDでは，現在の勾配行列の特異値分解を使って更新方向を決めた．
+Shampooは，過去の勾配から二つの行列を作り，勾配行列の左と右から掛けることで前処理する方法である\cite{gupta2018shampoo}．
+まず更新式を示し，近接項との対応を確かめた後で，SpectralGDとの関係を調べる．
+
+パラメータ，勾配ともに，前項と同じ $m\times n$ の行列とする．
+ここでは，勾配の二次統計を指数移動平均で推定する．
+初期値を $\bm{A}_{-1}=\varepsilon\bm{I}_m$，$\bm{B}_{-1}=\varepsilon\bm{I}_n$ とし，
+$0\leq\beta<1$，$\varepsilon>0$ に対して，
+\begin{equation}
+  \begin{aligned}
+    \bm{A}_k&=\beta\bm{A}_{k-1}
+      +(1-\beta)(\bm{g}_k\bm{g}_k^\top+\varepsilon\bm{I}_m),\\
+    \bm{B}_k&=\beta\bm{B}_{k-1}
+      +(1-\beta)(\bm{g}_k^\top\bm{g}_k+\varepsilon\bm{I}_n)
+  \end{aligned}
+  \label{eq:md-shampoo-statistics}
+\end{equation}
+を定める．$\bm{A}_k$ は勾配の行同士，$\bm{B}_k$ は列同士の内積の指数移動平均に，$\varepsilon\bm{I}$ を加えた行列であり，
+それぞれ $m\times m$，$n\times n$ の大きさを持つ．
+$\beta$ が大きいほど過去の情報を長く残し，$\varepsilon\bm{I}$ は正定値性を保つために加えている．
+Shampooの更新は，これらを用いて
+\begin{equation}
+  \bm{W}_\ell^{(k+1)}
+  =\bm{W}_\ell^{(k)}-\eta\bm{A}_k^{-1/4}\bm{g}_k\bm{B}_k^{-1/4}
+  \label{eq:md-shampoo-update}
+\end{equation}
+と書ける．行列の $-1/4$ 乗は，正定値行列を固有値分解し，各固有値を $-1/4$ 乗してから同じ固有ベクトルで組み直した行列を意味する．
+これにより，勾配の二乗の平均が大きい方向ほど更新を抑える．
+全成分をベクトルに並べると前処理行列は $mn\times mn$ になるが，
+Shampooでは左右の二つの行列を保持すればよい．必要な行列要素の数は $m^2n^2$ から $m^2+n^2$ に減る．
+
+この更新も，近接項を選ぶことで得られる．
+1回の更新の間は $\bm{A}_k,\bm{B}_k$ を固定し，更新量を測るノルムを
+\begin{equation}
+  \|\bm{\delta}\|_k^2
+  :=\operatorname{Tr}\left(
+  \bm{\delta}^\top\bm{A}_k^{1/4}\bm{\delta}\bm{B}_k^{1/4}\right)
+  =\left\|\bm{A}_k^{1/8}\bm{\delta}\bm{B}_k^{1/8}\right\|_{\mathrm F}^2
+  \label{eq:md-shampoo-norm}
+\end{equation}
+で定める．$\|\bm{M}\|_{\mathrm F}^2:=\sum_{i,j}M_{ij}^2$ はフロベニウスノルムの二乗である．
+右辺は，行列の左右を変換してから成分の二乗を足すことを表している．
+両側の変換が可逆なので，これは行列の空間上のノルムを定める．
+近接項の係数を $\lambda=1/\eta$ と選ぶと，局所最小化問題は
+\begin{equation}
+  \bm{\delta}_k=\underset{\bm{\delta}}{\operatorname{argmin}}
+  \left\{\langle\bm{g}_k,\bm{\delta}\rangle_{\mathrm F}
+  +\frac{1}{2\eta}\|\bm{\delta}\|_k^2\right\}
+  \label{eq:md-shampoo-model}
+\end{equation}
+となる．微分してゼロとおくと，
+\begin{equation}
+  \bm{g}_k+\eta^{-1}\bm{A}_k^{1/4}\bm{\delta}_k\bm{B}_k^{1/4}=\bm{0}
+  \label{eq:md-shampoo-stationarity}
+\end{equation}
+を得る．左から $\bm{A}_k^{-1/4}$，右から $\bm{B}_k^{-1/4}$ を掛ければ，
+$\bm{\delta}_k=-\eta\bm{A}_k^{-1/4}\bm{g}_k\bm{B}_k^{-1/4}$ となり，
+式\eqref{eq:md-shampoo-update}が得られた．
+前節のフィッシャー情報行列は予測分布の変化から定まったが，ここでは観測した勾配の二次統計から近接ノルムを定めている．
+
+では，なぜ左右とも $-1/4$ 乗なのだろうか．
+SpectralGDとの関係を見るために，$\beta=0$ として現在の勾配だけを使い，$\varepsilon\bm{I}$ をいったん外して，
+$\bm{A}_k=\bm{g}_k\bm{g}_k^\top$，$\bm{B}_k=\bm{g}_k^\top\bm{g}_k$ としてみる．
+この場合は行列が特異になりうるため，以下の負のべき乗では，正の固有値だけをべき乗し，ゼロ固有値はゼロのままにする．
+これは擬似逆行列を用いることに相当する．
+前項の特異値分解を代入すると，
+\begin{align}
+  (\bm{g}_k\bm{g}_k^\top)^{-1/4}
+  &=\bm{U}_k\bm{\Sigma}_k^{-1/2}\bm{U}_k^\top,
+  \notag\\
+  (\bm{g}_k^\top\bm{g}_k)^{-1/4}
+  &=\bm{V}_k\bm{\Sigma}_k^{-1/2}\bm{V}_k^\top,
+  \notag\\
+  (\bm{g}_k\bm{g}_k^\top)^{-1/4}\bm{g}_k
+  (\bm{g}_k^\top\bm{g}_k)^{-1/4}
+  &=\bm{U}_k\bm{\Sigma}_k^{-1/2}
+  \bm{\Sigma}_k\bm{\Sigma}_k^{-1/2}\bm{V}_k^\top
+  =\bm{U}_k\bm{V}_k^\top
+  \label{eq:md-shampoo-spectral-identity}
+\end{align}
+となる．勾配の特異値 $\sigma_{k,i}$ に対し，左右からそれぞれ $\sigma_{k,i}^{-1/2}$ が掛かり，積が $1$ になる．
+こうして，過去の履歴とdampingを外したShampooは，SpectralGD，すなわちmomentumを使わず直交化を厳密に行うMuonと同じ更新を与える．
+
+現在の勾配だけを使って $\varepsilon\bm{I}$ を残すと，更新方向の特異値は
+$\sigma_{k,i}/\sqrt{\sigma_{k,i}^2+\varepsilon}$ となり，小さい特異値方向の更新が抑えられる．
+指数移動平均を用いるShampooは，式\eqref{eq:md-shampoo-norm}の近接ノルムを勾配の履歴に応じて変える方法として理解できる．
+
+\subsection{AdamWとの関係}
+\label{subsec:md-adamw}
+
+Shampooは，勾配の二次統計を行列の構造を残して扱う方法だった．
+同じ二次統計を，成分ごとの二乗だけを残して対角近似すると，Adamの前処理につながる．
+これに勾配そのものの指数移動平均を組み合わせたものがAdamである\footnote{ここで対角近似する対象は，ベクトル化した勾配の二次統計である．Shampooの左右の行列 $\bm{A}_k,\bm{B}_k$ をそれぞれ対角化する場合には，行と列ごとの二次統計を使う更新になる．}．
+以下では，パラメータと勾配をベクトル $\bm{\theta}^{(k)},\bm{g}_k\in\mathbb{R}^d$ として書き，AdamWの記法でこの対応を示す．
+
+勾配の平均を $\bm{m}_k$，勾配の二乗の平均を $\bm{v}_k$ とし，初期値を $\bm{m}_{-1}=\bm{v}_{-1}=\bm{0}$ とする．
+$0\leq\beta_1,\beta_2<1$ に対して，各反復で
+\begin{equation}
+  \begin{aligned}
+    \bm{m}_k&=\beta_1\bm{m}_{k-1}+(1-\beta_1)\bm{g}_k,\\
+    \bm{v}_k&=\beta_2\bm{v}_{k-1}+(1-\beta_2)\bm{g}_k^{\odot2}
+  \end{aligned}
+  \label{eq:md-adam-moments}
+\end{equation}
+と更新する．$\bm{g}_k^{\odot2}$ は各成分を二乗したベクトルである．
+勾配の外積 $\bm{g}_k\bm{g}_k^\top$ の対角成分は $g_{k,i}^2$ なので，$\bm{v}_k$ は二次統計の対角成分の指数移動平均に当たる．
+初期値ゼロによる偏りを補正するため，
+\begin{equation}
+  \widehat{\bm{m}}_k=\frac{\bm{m}_k}{1-\beta_1^{k+1}},
+  \qquad
+  \widehat{\bm{v}}_k=\frac{\bm{v}_k}{1-\beta_2^{k+1}}
+  \label{eq:md-adam-bias-correction}
+\end{equation}
+を使う\cite{kingma2015adam}．
+
+前処理との対応を見るため，$\bm{D}_k:=\operatorname{diag}(\widehat{\bm{v}}_k)$ とおく．
+二次統計の対角行列の逆平方根を勾配に掛けることは，各成分を勾配の二乗の平均の平方根で割ることに等しい．
+近接項を用いると，現在の勾配の代わりにその平均 $\widehat{\bm{m}}_k$ を使って，
+\begin{equation}
+  \bm{\delta}_k=\underset{\bm{\delta}}{\operatorname{argmin}}
+  \left\{\widehat{\bm{m}}_k^\top\bm{\delta}
+  +\frac{1}{2\eta}\bm{\delta}^\top
+    (\bm{D}_k^{1/2}+\varepsilon\bm{I})\bm{\delta}\right\},
+  \qquad\varepsilon>0
+  \label{eq:md-adam-proximity}
+\end{equation}
+と書ける．その最小解は，各成分について
+$\delta_{k,i}=-\eta\widehat{m}_{k,i}/(\sqrt{\widehat{v}_{k,i}}+\varepsilon)$ となる．
+勾配の二乗の平均が大きい成分ほど更新を抑える，対角の前処理である．
+
+この更新に，係数 $\lambda_{\mathrm{wd}}\geq0$ の重み減衰を加えると，AdamWの更新は
+\begin{equation}
+  \bm{\theta}^{(k+1)}
+  =(1-\eta\lambda_{\mathrm{wd}})\bm{\theta}^{(k)}
+  -\eta\frac{\widehat{\bm{m}}_k}
+    {\sqrt{\widehat{\bm{v}}_k}+\varepsilon\bm{1}}
+  \label{eq:md-adamw-update}
+\end{equation}
+となる\cite{loshchilov2019adamw}．平方根と割り算は成分ごとに行い，$\bm{1}$ は全成分が $1$ のベクトルである．
+
+最後に，二つの指数移動平均を外して $\beta_1=\beta_2=0$ とし，$\varepsilon$ と重み減衰もゼロとする．
+このとき $\widehat{\bm{m}}_k=\bm{g}_k$，$\widehat{\bm{v}}_k=\bm{g}_k^{\odot2}$ なので，
+\begin{equation}
+  \theta_i^{(k+1)}
+  =\theta_i^{(k)}-\eta\frac{g_{k,i}}{\sqrt{g_{k,i}^2}}
+  =\theta_i^{(k)}-\eta\operatorname{sign}(g_{k,i})
+  \label{eq:md-adam-signgd}
+\end{equation}
+となり，signGDが得られる\cite{eschenhagen2026clarifying}．$g_{k,i}=0$ の成分では更新量をゼロとする．
+Shampooから履歴を外すと特異値をそろえるSpectralGDが現れ，Adamから履歴を外すと成分の大きさをそろえるsignGDが現れる．
+どちらも，二次統計の履歴を用いることで，現在の勾配を規格化する更新から，過去の勾配の大きさも反映した更新へ拡張されている．
+
+\chapterbibliography
+
+\end{document}

@@ -1,0 +1,272 @@
+\documentclass[../main.tex]{subfiles}
+
+\begin{document}
+% 単独でコンパイルした場合も、全体版と章番号をそろえる。
+\ifSubfilesClassLoaded{\setcounter{chapter}{3}}{}
+
+\chapter{ミニバッチ学習}
+
+複数のGPUを使うデータ並列学習では，異なるサンプルの勾配を同時に計算できる．
+各GPUが処理するサンプル数を保ってGPU台数を増やすと，1回の更新で使う全体のバッチサイズも大きくなる．
+ミニバッチを大きくすると，勾配をより小さい分散で推定できる．
+バッチサイズが大きくなると，更新回数を減らす効果は次第に小さくなる．
+本章では，バッチサイズを増やす効果が小さくなり始める領域を説明し，二次関数に勾配ノイズを加えたモデルでその理由を調べる．
+さらに，前処理によって収束とノイズの両方が変わることから，この領域が大きいバッチサイズの側へ移る仕組みを考える．
+
+\section{クリティカルバッチサイズ}
+\label{sec:critical-batch-size}
+
+\subsection{分散学習でバッチサイズを増やす理由}
+
+学習時間を短くするために，複数のGPUで勾配計算を分担する場合を考える．
+同期型のデータ並列学習では，各GPUが同じパラメータを保持し，異なるサンプルに対して勾配を計算する．
+その勾配を通信によって集約し，全GPUで同じ勾配の平均を使ってパラメータを更新する．
+GPU台数を $m$，各GPUが1回に処理するローカルバッチサイズを $b$ とすれば，全体のバッチサイズは $B=mb$ である．
+以下で単にバッチサイズという場合は，この全体の $B$ を指す．
+
+全体の $B$ を固定したままGPUを増やすと，各GPUの担当量 $b=B/m$ は小さくなる．
+計算量は減るが，更新ごとの勾配の集約は必要である．
+担当量が小さくなるにつれて通信の占める割合が増え，GPUも十分な効率で計算できなくなることがある．
+そこで，各GPUにある程度まとまった計算を割り当てたまま，台数に応じて全体の $B$ を増やすことを考える．
+これなら，通信時間の増加が小さい範囲では，1回の更新時間をあまり変えずに，より多くのサンプルを処理できる．
+
+この並列化によって学習時間を短くするには，バッチサイズの増加に伴って必要な更新回数も減ることが必要である．
+1回の更新時間を $\tau(m,b)$，目標までの更新回数を $T(B)$ とすれば，学習時間はおおむね $\tau(m,b)T(mb)$ である．
+ローカルバッチサイズ $b$ を保ってGPU台数を2倍にし，$\tau$ がほぼ変わらず $T$ が半分になれば，学習時間もほぼ半分になる．
+逆に，$T$ が減らなくなれば，GPUを増やしても学習時間はほとんど短くならない．
+クリティカルバッチサイズを調べるのは，計算機を増やす効果を得るために，バッチサイズをどこまで大きくできるかを知りたいからである．
+
+\subsection{バッチサイズと更新回数}
+
+バッチサイズを $B$ とし，同じ初期条件から目標損失 $\varepsilon$ に達するまでの更新回数を $T(B)$ と書く．
+手法を比較する際には，目標損失と学習率の調整方法をそろえておく必要がある．
+以下では，それぞれの $B$ に応じて学習率を調整した場合を考える．
+後で導入する確率的なモデルでは，期待損失が $\varepsilon$ 以下になるまでの回数を用いる．
+
+勾配ノイズの影響が大きい領域では，バッチサイズを増やすことで大きな学習率を使えるようになり，更新回数が減る場合がある．
+とくに，$B$ を2倍にすると $T(B)$ がほぼ半分になる関係を完全なスケーリング（perfect scaling）と呼ぶ．
+この領域では，ある係数 $K$ を用いて $T(B)\approx K/B$ と書ける．
+1回の更新で $B$ 個のサンプルを使うので，処理する総サンプル数 $BT(B)$ はほぼ一定である．
+十分に並列計算できれば，総サンプル数をあまり増やさずに更新回数を減らせる．
+
+一方，ノイズを十分小さくすると，更新の進み方はノイズのない最適化に近づく．
+その場合にも，損失の曲率や最適化手法によって必要な反復回数が決まる．
+ノイズがない場合の更新回数を $T_{\mathrm{det}}$ と書くと，二つの領域の関係は概略
+\begin{equation}
+  T(B)\approx
+  \begin{cases}
+    K/B, & \text{ノイズの影響が大きい領域},\\
+    T_{\mathrm{det}}, & \text{ノイズの影響が小さい領域}
+  \end{cases}
+  \label{eq:bs-scaling}
+\end{equation}
+と表せる．実際には，この間にバッチサイズを増やす効果が徐々に小さくなる領域がある．
+
+\subsection{クリティカルバッチサイズの意味}
+
+完全なスケーリングが続く領域から，改善が鈍る領域へ移る目安を
+クリティカルバッチサイズ（critical batch size），$B_{\mathrm{crit}}$ と呼ぶ．
+その値は，どの程度の改善を境界とするかによって変わる．
+式\eqref{eq:bs-scaling}の二つの漸近的な関係をつなぐなら，$B_{\mathrm{crit}}\approx K/T_{\mathrm{det}}$ が一つの目安になる．
+
+$B_{\mathrm{crit}}$ が大きいとは，バッチサイズの増加によって更新回数を減らせる範囲が広いということである．
+
+この目安は最適化手法によっても変わる．
+以下では，Zhang らの noisy quadratic model の解析をもとに，前処理による変化を調べる\cite{zhang2019nqm}．
+比較では，目標損失，初期値，学習率の選び方をそろえる．
+
+\section{Noisy quadratic model}
+\label{sec:noisy-quadratic-model}
+
+\subsection{二次損失と勾配ノイズ}
+
+損失の曲率と勾配ノイズの役割を分けて調べるために，最小点を原点とする二次関数
+\begin{equation}
+  \mathcal{L}(\bm{\theta})=\frac12\bm{\theta}^\top \bm{H}\bm{\theta}
+  =\frac12\sum_{i=1}^d h_i \theta_i^2
+  \label{eq:nqm-loss}
+\end{equation}
+を考える．ここで $\bm{H}=\operatorname{diag}(h_1,\ldots,h_d)$，$h_1\geq\cdots\geq h_d>0$ とする．
+正定値の二次関数は，固有ベクトルを座標軸に選べばこの形になる．
+真の勾配は $\nabla \mathcal{L}(\bm{\theta})=\bm{H}\bm{\theta}$ だが，各反復ではノイズを含む勾配
+\begin{equation}
+  \bm{g}_B^{(k)}=\bm{H}\bm{\theta}^{(k)}+\bm{\xi}^{(k)},
+  \qquad
+  \mathbb{E}[\bm{\xi}^{(k)}\mid\bm{\theta}^{(k)}]=\bm{0},
+  \qquad
+  \operatorname{Cov}(\bm{\xi}^{(k)}\mid\bm{\theta}^{(k)})=\frac{\bm{C}}{B}
+  \label{eq:nqm-gradient}
+\end{equation}
+を使うと仮定する．毎回新しいサンプルから独立にノイズが生じ，その共分散 $\bm{C}$ はパラメータによらないものとする．
+独立な $B$ 個の勾配の平均を使うため，ノイズの共分散は1サンプルの場合の $1/B$ になる．
+
+さらに，$\bm{C}=\operatorname{diag}(c_1,\ldots,c_d)$，$c_i\geq0$ とする．
+$\bm{H}$ と $\bm{C}$ を同じ座標で対角行列にできることは，解析のための追加の仮定である．
+このように，二次損失に対してノイズを含む勾配を観測する設定を noisy quadratic model（NQM）と呼ぶ．
+実際のニューラルネットワークでは，曲率もノイズ共分散も学習中に変わる．
+ここではそれらを固定して，バッチサイズが更新回数を変える仕組みを調べる．
+
+\subsection{期待損失の時間変化}
+
+一定の学習率 $\eta>0$ を用いた確率的勾配降下法は，各成分について
+\begin{equation}
+  \theta_i^{(k+1)}=(1-\eta h_i)\theta_i^{(k)}-\eta\xi_i^{(k)}
+  \label{eq:nqm-sgd}
+\end{equation}
+となる．右辺を二乗して期待値をとると，現在のパラメータとノイズとの交差項はゼロになる．
+したがって，
+\begin{equation}
+  \mathbb{E}[(\theta_i^{(k+1)})^2]
+  =(1-\eta h_i)^2\mathbb{E}[(\theta_i^{(k)})^2]
+  +\frac{\eta^2c_i}{B}
+  \label{eq:nqm-second-moment}
+\end{equation}
+を得る．第1項は前の反復から残る誤差，第2項はその回の勾配ノイズによって加わる分である．
+
+各方向の損失を $\ell_i(\theta_i)=h_i\theta_i^2/2$ とし，$q_i=1-\eta h_i$ とおく．
+すべての方向で $|q_i|<1$，すなわち $0<\eta<2/h_1$ を仮定する．
+式\eqref{eq:nqm-second-moment}を繰り返し使うと，ノイズの寄与には
+$\sum_{j=0}^{k-1}q_i^{2j}=(1-q_i^{2k})/(1-q_i^2)$ が現れる．
+これを用いて，期待損失は
+\begin{equation}
+  \mathbb{E}[\ell_i(\theta_i^{(k)})]
+  =q_i^{2k}\mathbb{E}[\ell_i(\theta_i^{(0)})]
+  +(1-q_i^{2k})\frac{\eta c_i}{2B(2-\eta h_i)}
+  \label{eq:nqm-risk}
+\end{equation}
+と求まる．全体の期待損失は，この式を $i$ について足し合わせればよい．
+
+第1項は初期値の影響を表し，反復とともにゼロに近づく．
+第2項は，一定の学習率のもとでノイズによって生じる損失である．
+極限 $k\to\infty$ で残る損失を定常損失と呼ぶと，その値は
+\begin{equation}
+  R_{\mathrm{ss}}
+  :=\lim_{k\to\infty}\mathbb{E}[\mathcal{L}(\bm{\theta}^{(k)})]
+  =\frac{1}{2B}\sum_{i=1}^d\frac{\eta c_i}{2-\eta h_i}
+  \label{eq:nqm-steady-risk}
+\end{equation}
+である．$B$ を増やすと定常損失は小さくなるが，初期値の影響の減衰率 $q_i^{2k}$ は，同じ学習率なら変わらない．
+バッチサイズを増やすことと学習率を変えることは，このように別の操作である．
+
+\section{前処理によるクリティカルバッチサイズの増大}
+\label{sec:preconditioned-critical-batch}
+
+\subsection{収束速度と更新ノイズ}
+
+前処理行列を $\bm{H}^{-p}$（$0\leq p\leq1$）と選び，確率的勾配に掛ける．
+$p=0$ は通常のSGD，$p=1$ はヘッセ行列の逆行列による前処理である．
+このモデルでは $\bm{H}$ が固定されているので，前処理行列も反復中に変化しない．
+更新式を成分ごとに書くと，
+\begin{equation}
+  \theta_i^{(k+1)}
+  =(1-\eta h_i^{1-p})\theta_i^{(k)}
+  -\eta h_i^{-p}\xi_i^{(k)}
+  \label{eq:nqm-preconditioned-step}
+\end{equation}
+となる．前処理は真の勾配とノイズの両方に掛かる．
+第1項では有効な曲率が $h_i$ から $h_i^{1-p}$ に変わり，第2項ではノイズに $h_i^{-p}$ が掛かっている．
+
+元の条件数を $\kappa=h_1/h_d$ とすると，前処理後の条件数は
+\begin{equation}
+  \widetilde\kappa=\frac{h_1^{1-p}}{h_d^{1-p}}=\kappa^{1-p}
+  \label{eq:nqm-condition-number}
+\end{equation}
+である．$p$ を大きくするとこの比が小さくなり，$p=1$ では1になる．
+実際に，ノイズがない場合に学習率を $\eta_{\mathrm{fast}}=h_1^{-(1-p)}$ と選べば，
+各方向の反復の倍率は $1-(h_i/h_1)^{1-p}$ となる．
+これらは0以上1未満であり，$p$ を大きくするほど小さくなる．
+したがって，同じ初期値からの損失は速く減少する．
+$p=1$ なら，全成分が1回の更新でゼロになる．これは正確な二次損失と正確な前処理についての結果である．
+
+一方，式\eqref{eq:nqm-preconditioned-step}で加わる更新ノイズの分散は
+\begin{equation}
+  \operatorname{Var}(\eta h_i^{-p}\xi_i^{(k)})
+  =\frac{\eta^2c_i h_i^{-2p}}{B}
+  \label{eq:nqm-update-noise}
+\end{equation}
+となる．先ほどの $\eta_{\mathrm{fast}}$ を使うと，ノイズに掛かる係数は
+$\eta_{\mathrm{fast}}h_i^{-p}=h_1^{-1}(h_1/h_i)^p$ である．
+最大曲率に比べて曲率の小さい方向ほど，$p$ を増やしたときのノイズの増幅が大きい．
+学習率をこのようにそろえて比較すれば，固有値の絶対的な大きさに依存せずに増幅を説明できる．
+
+\subsection{ノイズによる学習率の制限}
+
+前処理を入れた場合も，二乗の期待値について同じ計算ができる．
+$q_{i,p}=1-\eta h_i^{1-p}$ とおき，安定性条件 $0<\eta<2/h_1^{1-p}$ を仮定すると，
+\begin{equation}
+  \mathbb{E}[\ell_i(\theta_i^{(k)})]
+  =q_{i,p}^{2k}\mathbb{E}[\ell_i(\theta_i^{(0)})]
+  +(1-q_{i,p}^{2k})
+  \frac{\eta c_i h_i^{-p}}{2B(2-\eta h_i^{1-p})}
+  \label{eq:nqm-preconditioned-risk}
+\end{equation}
+を得る．したがって，定常損失は
+\begin{equation}
+  R_{\mathrm{ss}}(\eta,p,B)
+  =\frac{\eta}{2B}\sum_{i=1}^d
+  \frac{c_i h_i^{-p}}{2-\eta h_i^{1-p}}
+  \label{eq:nqm-preconditioned-steady}
+\end{equation}
+となる．
+
+目標損失 $\varepsilon$ に余裕をもって到達するため，定常損失をその一定割合以下，
+$R_{\mathrm{ss}}\leq r\varepsilon$（$0<r<1$）に抑えるものとする．
+実際，式\eqref{eq:nqm-preconditioned-risk}の初期値の項の和を $(1-r)\varepsilon$ 以下にすれば，全体の期待損失も $\varepsilon$ 以下になる．
+
+$\eta h_1^{1-p}\ll1$ の範囲では，$S_p:=\sum_i c_i h_i^{-p}$ とおくと，
+\begin{equation}
+  R_{\mathrm{ss}}\approx\frac{\eta S_p}{4B},
+  \qquad
+  \eta\lesssim\frac{4r\varepsilon B}{S_p}
+  \label{eq:nqm-noise-lr}
+\end{equation}
+となる．バッチサイズが小さく，この条件によって学習率が制限される間は，$B$ にほぼ比例して学習率を増やせる．
+また，小さい学習率では $q_{i,p}^{2k}\approx\exp(-2\eta h_i^{1-p}k)$ だから，
+初期値の項を一定の割合まで減らす回数はおおむね $1/\eta$ に比例する．
+この二つの関係を合わせると，$T(B)\propto1/B$ という小バッチ領域の挙動を説明できる．
+
+ノイズが十分小さくなれば，学習率は曲率による安定性条件のもとで，決定論的な収束に適した値で決まる．
+この段階では，さらに $B$ を増やすことで得られる更新回数の減少は小さくなる．
+次に，近似前の定常損失を使って，大きな学習率を使えるバッチサイズを調べる．
+
+\subsection{速い更新に必要なバッチサイズ}
+
+比較する学習率を再び $\eta_{\mathrm{fast}}=h_1^{-(1-p)}$ とする．
+これは全方向で安定であり，ノイズのない場合には最大曲率方向の誤差を1回でゼロにする．
+さらに，ここではノイズ共分散と曲率の関係を $\bm{C}=\bm{H}$ と仮定する．
+これはZhang らの論文でも用いられた設定である．
+
+$x_i(p):=(h_i/h_1)^{1-p}$ とおき，式\eqref{eq:nqm-preconditioned-steady}に代入すると，
+\begin{equation}
+  R_{\mathrm{ss}}(\eta_{\mathrm{fast}},p,B)
+  =\frac{1}{2B}\sum_{i=1}^d\frac{x_i(p)}{2-x_i(p)}
+  \label{eq:nqm-fast-risk}
+\end{equation}
+となる．$0<h_i/h_1\leq1$ なので，$p$ を大きくすると $x_i(p)$ は減少しない．
+さらに，$x/(2-x)$ は $0<x\leq1$ で単調増加する．
+したがって，この学習率を使った定常損失は，前処理を強くするほど大きくなるか，同じ値にとどまる．
+
+$R_{\mathrm{ss}}\leq r\varepsilon$ を満たす条件をバッチサイズについて解くと，
+\begin{equation}
+  B\geq B_{\mathrm{fast}}(p)
+  :=\frac{1}{2r\varepsilon}
+  \sum_{i=1}^d\frac{x_i(p)}{2-x_i(p)}
+  \label{eq:nqm-fast-batch}
+\end{equation}
+を得る．右辺は $p$ に対して単調非減少であり，最大固有値より小さい固有値があれば，$p$ とともに厳密に増える．
+とくに $p=1$ ではすべての $x_i$ が1になり，$B_{\mathrm{fast}}(1)=d/(2r\varepsilon)$ である．
+前処理によって決定論的な収束が速くなる一方で，その学習率を使ったままノイズを抑えるには，より大きなバッチが必要になることが分かる．
+
+$B_{\mathrm{fast}}$ は指定した学習率で定常損失を抑えるための目安である．
+$B_{\mathrm{crit}}$ を具体的に求めるには，初期値と目標損失を決め，学習率を調整しながら式\eqref{eq:nqm-preconditioned-risk}から到達回数を比較する必要がある．
+式\eqref{eq:nqm-fast-batch}は，前処理を強くするほど大きなバッチサイズまでノイズが学習率を制限しうることを示している．
+同時に，ノイズが小さい領域では決定論的な更新回数も減る．
+この二つの変化が，前処理によってクリティカルバッチサイズが大きくなる理由である．
+
+実際の学習では，前処理がどの方向の収束を速め，その方向のノイズをどの程度変えるかを併せて調べる必要がある．
+
+\section{確率的分散縮小アルゴリズム}
+
+\chapterbibliography
+
+\end{document}

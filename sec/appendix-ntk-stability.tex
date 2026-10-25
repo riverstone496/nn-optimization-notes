@@ -1,0 +1,268 @@
+\documentclass[../main.tex]{subfiles}
+
+\begin{document}
+\ifSubfilesClassLoaded{\appendix}{}
+
+\chapter{NTK regimeの保証}
+\label{app:ntk-stability}
+
+第6章では，NTK regimeで学習中も $\bm{J}_t\approx\bm{J}_0$，$\bm{K}_t\approx\bm{K}_0$ とみなせることを使った．
+この付録では，Leeら\cite{lee2019wide}の証明に沿って，ヤコビ行列の局所的な評価から，学習の全時間にわたる評価を導く．
+局所評価そのものも計算で確かめられるように，まず二層ネットワークを扱う．
+証明は，初期値近傍でのヤコビ行列の変化を評価し，次に学習軌道がその近傍に留まることを示す，という順に進める．
+最後に，線形化モデルとの出力の差も評価する．
+
+\section{二層ネットワークでの局所評価}
+
+隠れ層の幅を $M$，出力をスカラーとし，
+\begin{equation}
+  f_{\bm{\theta}}(\bm{x})
+  =\frac1{\sqrt{M}}\sum_{j=1}^M
+    a_j\phi(\bm{w}_j^\top\bm{x})
+  =\frac1{\sqrt{M}}\bm{W}_2\phi(\bm{W}_1\bm{x})
+  \label{eq:app-ntk-network}
+\end{equation}
+と書く．$\bm{w}_j^\top$ は $\bm{W}_1$ の第 $j$ 行，$a_j$ は $\bm{W}_2$ の第 $j$ 成分であり，$\bm{\theta}$ は両方の重みを並べたベクトルである．
+入力次元だけに依存する規格化係数は，入力の尺度に含めている．
+訓練入力は $\|\bm{x}_i\|_2\leq1$ とし，データ数 $N$ は幅 $M$ によらず固定する．
+活性化関数は二階連続微分可能で，ある $C_\phi\geq1$ に対して
+\begin{equation}
+  |\phi(u)|,\quad |\phi'(u)|,\quad |\phi''(u)|\leq C_\phi
+  \qquad(u\in\mathbb{R})
+  \label{eq:app-ntk-activation}
+\end{equation}
+とする．たとえば $\tanh$ はこの条件を満たす．
+
+出力を訓練入力上で並べたベクトルを $\bm{f}(\bm{\theta})\in\mathbb{R}^N$，そのヤコビ行列を $\bm{J}(\bm{\theta})$ とし，
+\begin{equation}
+  \bm{J}(\bm{\theta})
+  :=\frac{\partial\bm{f}(\bm{\theta})}{\partial\bm{\theta}},
+  \qquad
+  \bm{K}(\bm{\theta})
+  :=\frac1N\bm{J}(\bm{\theta})\bm{J}(\bm{\theta})^\top
+  \label{eq:app-ntk-definitions}
+\end{equation}
+と定める．第6章と同じく，NTK行列には損失の係数 $1/N$ を含めている．
+初期値を $\bm{\theta}_0$，各ユニットの出力側の初期重みを $a_{j,0}$ と書く．
+ここでは，
+\begin{equation}
+  \frac1M\sum_{j=1}^M a_{j,0}^2\leq2,
+  \qquad
+  A_M:=\max_{1\leq j\leq M}|a_{j,0}|
+  \label{eq:app-ntk-initial-weights}
+\end{equation}
+を満たす初期値を考える．ガウス初期値でこの条件が成り立つ確率は，後で確認する．
+
+幅によらない半径 $R>0$ の球 $\|\bm{\theta}-\bm{\theta}_0\|_2\leq R$ を考える．
+まず，$M\geq R^2$ なら，この球の中で
+\begin{equation}
+  \frac1M\sum_j a_j^2
+  \leq\frac2M\sum_j a_{j,0}^2
+    +\frac2M\sum_j(a_j-a_{j,0})^2
+  \leq4+\frac{2R^2}{M}\leq6
+  \label{eq:app-ntk-weight-bound}
+\end{equation}
+となる．一方，一つの入力に対する出力の微分は，$u_j=\bm{w}_j^\top\bm{x}$ とおくと
+\begin{equation}
+  \frac{\partial f_{\bm{\theta}}(\bm{x})}{\partial a_j}
+  =\frac{\phi(u_j)}{\sqrt{M}},
+  \qquad
+  \nabla_{\bm{w}_j}f_{\bm{\theta}}(\bm{x})
+  =\frac{a_j\phi'(u_j)}{\sqrt{M}}\bm{x}
+  \label{eq:app-ntk-first-derivatives}
+\end{equation}
+である．これらの成分の二乗を足すと，式\eqref{eq:app-ntk-weight-bound}から
+\begin{equation}
+  \|\bm{J}(\bm{\theta})\|_{\mathrm F}^2
+  \leq\sum_{i=1}^N\frac{C_\phi^2}{M}
+    \sum_j(1+a_j^2)
+  \leq7NC_\phi^2=:B^2
+  \label{eq:app-ntk-jacobian-bound}
+\end{equation}
+を得る．$B$ は幅 $M$ によらない．
+
+次に，ヤコビ行列がどれだけ変わるかを評価する．
+パラメータをユニットごとに並べ替えると，出力のヘッセ行列は，$(a_j,\bm{w}_j)$ に対応するブロック
+\begin{equation}
+  \frac1{\sqrt{M}}
+  \begin{pmatrix}
+    0&\phi'(u_j)\bm{x}^\top\\
+    \phi'(u_j)\bm{x}&a_j\phi''(u_j)\bm{x}\bm{x}^\top
+  \end{pmatrix}
+  \label{eq:app-ntk-output-hessian}
+\end{equation}
+を持つブロック対角行列になる．
+各ブロックの作用素ノルムは $C_\phi(2+|a_j|)/\sqrt{M}$ 以下であり，球の中では $|a_j|\leq A_M+R$ である．
+したがって，一つの出力のヘッセ行列の作用素ノルムは $3C_\phi(1+A_M+R)/\sqrt{M}$ 以下になる．
+二つの点 $\bm{\theta},\widetilde{\bm{\theta}}$ を結ぶ線分に沿って微分を積分し，訓練入力 $N$ 個について足し合わせると，
+\begin{equation}
+  \|\bm{J}(\bm{\theta})-\bm{J}(\widetilde{\bm{\theta}})\|_{\mathrm F}
+  \leq\varepsilon_M\|\bm{\theta}-\widetilde{\bm{\theta}}\|_2,
+  \qquad
+  \varepsilon_M:=\frac{3C_\phi\sqrt{N}(1+A_M+R)}{\sqrt{M}}
+  \label{eq:app-ntk-local-lipschitz}
+\end{equation}
+を得る．$A_M/\sqrt{M}\to0$ なら，$\varepsilon_M\to0$ である．
+つまり，初期値から幅によらない距離だけパラメータを動かしても，ヤコビ行列の変化は幅とともに小さくなる．
+
+\section{学習軌道が初期値近傍に留まること}
+
+局所評価が得られても，学習軌道が球から出てしまえば，その評価は使い続けられない．
+ここでは，残差の減衰を使って，学習軌道が球の内側に留まることを示す．
+この部分で使うのは，ヤコビ行列の上界 $B$ と局所リプシッツ係数 $\varepsilon_M$ だけであり，二層という構造には依存しない．
+
+第6章と同じ二乗損失と勾配流を考え，残差を $\bm{e}_t:=\bm{f}(\bm{\theta}(t))-\bm{y}$ と書く．
+すると，
+\begin{equation}
+  \frac{d\bm{\theta}}{dt}
+  =-\frac{\eta}{N}\bm{J}_t^\top\bm{e}_t,
+  \qquad
+  \frac{d\bm{e}_t}{dt}=-\eta\bm{K}_t\bm{e}_t
+  \label{eq:app-ntk-flow}
+\end{equation}
+である．初期値で $\|\bm{e}_0\|_2\leq E$（$E>0$），$\lambda_{\min}(\bm{K}_0)\geq\kappa>0$ とし，$E,\kappa$ は幅によらないものとする．
+球の半径を
+\begin{equation}
+  R:=\frac{4BE}{N\kappa}
+  \label{eq:app-ntk-radius}
+\end{equation}
+と選び，この球で前節の局所評価が成り立つとする．
+
+球の中では，NTKの差を
+\begin{align}
+  \|\bm{K}(\bm{\theta})-\bm{K}_0\|_{\mathrm{op}}
+  &\leq\frac1N\left(
+    \|\bm{J}(\bm{\theta})\|_{\mathrm{op}}
+    +\|\bm{J}_0\|_{\mathrm{op}}\right)
+    \|\bm{J}(\bm{\theta})-\bm{J}_0\|_{\mathrm{op}}\notag\\
+  &\leq\frac{2B\varepsilon_M R}{N}
+  =:\Delta_M
+  \label{eq:app-ntk-kernel-bound}
+\end{align}
+と評価できる．ここでは，積の差を
+$(\bm{J}-\bm{J}_0)\bm{J}^\top
++\bm{J}_0(\bm{J}-\bm{J}_0)^\top$ と分け，作用素ノルムがフロベニウスノルム以下であることを使った．
+幅を十分大きくして $\Delta_M\leq\kappa/2$ とすれば，球の中で
+\begin{equation}
+  \bm{K}(\bm{\theta})\succeq\frac{\kappa}{2}\bm{I}
+  \label{eq:app-ntk-kernel-gap}
+\end{equation}
+が成り立つ．
+
+学習軌道が初めて球の境界に達する時刻を
+$\tau:=\inf\{t\geq0:\|\bm{\theta}(t)-\bm{\theta}_0\|_2=R\}$ とする．
+そのような時刻がなければ $\tau=\infty$ とする．
+$t<\tau$ では，式\eqref{eq:app-ntk-kernel-gap}が使えるので，
+\begin{equation}
+  \frac{d}{dt}\|\bm{e}_t\|_2^2
+  =-2\eta\bm{e}_t^\top\bm{K}_t\bm{e}_t
+  \leq-\eta\kappa\|\bm{e}_t\|_2^2,
+  \qquad
+  \|\bm{e}_t\|_2\leq E e^{-\eta\kappa t/2}
+  \label{eq:app-ntk-residual-decay}
+\end{equation}
+となる．残差が減ると，パラメータの動く速さも小さくなる．
+実際，勾配流を積分すると，
+\begin{align}
+  \|\bm{\theta}(t)-\bm{\theta}_0\|_2
+  &\leq\int_0^t\left\|\frac{d\bm{\theta}(s)}{ds}\right\|_2ds
+  \leq\frac{\eta BE}{N}\int_0^t e^{-\eta\kappa s/2}\,ds\notag\\
+  &=\frac{2BE}{N\kappa}(1-e^{-\eta\kappa t/2})
+  \leq\frac R2
+  \label{eq:app-ntk-displacement}
+\end{align}
+を得る．もし $\tau<\infty$ なら，連続性により $t=\tau$ でも左辺は $R/2$ 以下である．
+これは境界に達したという $\tau$ の定義に反する．
+したがって $\tau=\infty$ であり，局所評価は学習の全時間で使える．
+
+以上から，
+\begin{equation}
+  \sup_{t\geq0}\|\bm{J}_t-\bm{J}_0\|_{\mathrm F}
+  \leq\varepsilon_M R,
+  \qquad
+  \sup_{t\geq0}\|\bm{K}_t-\bm{K}_0\|_{\mathrm{op}}
+  \leq\Delta_M
+  \label{eq:app-ntk-uniform-stability}
+\end{equation}
+となる．$\varepsilon_M\to0$ なら，両方の変化が学習の全時間にわたってゼロに近づく．
+パラメータ全体の移動量は幅によらない上界で抑えられ，ヤコビ行列とNTKの変化は幅とともに小さくなるのである．
+
+\section{ガウス初期値で条件を満たす確率}
+
+重み $a_{j,0},\bm{w}_{j,0}$ の各成分を独立な標準正規分布で初期化する．
+大数の法則から $M^{-1}\sum_j a_{j,0}^2\to1$ なので，式\eqref{eq:app-ntk-initial-weights}の第1条件は，幅を大きくすると確率 $1$ に近づく．
+また，ガウス分布の尾部評価と和の上界から，任意の $\delta\in(0,1)$ に対して
+\begin{equation}
+  \mathbb{P}\!\left(
+    A_M>\sqrt{2\log\frac{2M}{\delta}}\right)
+  \leq\sum_{j=1}^M
+    2\exp\!\left(-\frac12\,2\log\frac{2M}{\delta}\right)
+  =\delta
+  \label{eq:app-ntk-gaussian-maximum}
+\end{equation}
+となる．したがって，固定した $\delta$ について，局所リプシッツ係数は高い確率で
+\begin{equation}
+  \varepsilon_M
+  =O\!\left(\sqrt{\frac{\log M}{M}}\right)\longrightarrow0
+  \label{eq:app-ntk-local-rate}
+\end{equation}
+と評価できる．この対数因子は，全ユニットの初期重みの最大値を使った評価から生じている．
+
+初期残差にも，幅によらない確率的な上界を取れる．
+$a_{j,0}$ の平均がゼロで，$\phi$ は有界なので，一つの入力に対して
+$\mathbb{E}[f_{\bm{\theta}_0}(\bm{x})^2]\leq C_\phi^2$ である．
+よって $\mathbb{E}\|\bm{e}_0\|_2^2\leq2NC_\phi^2+2\|\bm{y}\|_2^2$ であり，Markovの不等式から，任意に高い確率で $\|\bm{e}_0\|_2\leq E$ となる定数 $E$ を，幅と独立に選べる．
+
+初期NTKの各成分も，独立なユニットの寄与の平均である．
+そのため，大数の法則から，$\bm{K}_0$ は幅の増大とともに非ランダムな行列 $\bm{K}_\infty$ に収束する．
+ここで，訓練入力について $\bm{K}_\infty\succ\bm{0}$ と仮定する\cite{jacot2018ntk,lee2019wide}．
+$\kappa:=\lambda_{\min}(\bm{K}_\infty)/2$ とおけば，幅を十分大きくすることで $\lambda_{\min}(\bm{K}_0)\geq\kappa$ も高い確率で成り立つ．
+以上の確率の上界を合わせると，任意の信頼水準 $1-\delta$ に対し，幅によらない $B,E,\kappa,R$ を選び，十分大きな幅で前節の条件を同時に満たせる．
+その初期値では，式\eqref{eq:app-ntk-uniform-stability}から，$\bm{J}_t-\bm{J}_0$ と $\bm{K}_t-\bm{K}_0$ はともに，学習の全時間で $O(\sqrt{\log M/M})$ に抑えられる．
+
+\section{線形化モデルとの出力の差}
+
+最後に，NTKを初期値で固定した式が，元のネットワークの学習を近似することを示す．
+元のネットワークの残差を $\bm{e}_t$，線形化モデルの残差を $\bm{e}^{\mathrm{lin}}_t$ とすると，
+\begin{equation}
+  \frac{d\bm{e}_t}{dt}=-\eta\bm{K}_t\bm{e}_t,
+  \qquad
+  \frac{d\bm{e}^{\mathrm{lin}}_t}{dt}
+  =-\eta\bm{K}_0\bm{e}^{\mathrm{lin}}_t,
+  \qquad
+  \bm{e}^{\mathrm{lin}}_0=\bm{e}_0
+  \label{eq:app-ntk-two-flows}
+\end{equation}
+である．その差 $\bm{d}_t:=\bm{e}_t-\bm{e}^{\mathrm{lin}}_t$ は
+\begin{equation}
+  \frac{d\bm{d}_t}{dt}
+  =-\eta\bm{K}_0\bm{d}_t
+    -\eta(\bm{K}_t-\bm{K}_0)\bm{e}_t,
+  \qquad\bm{d}_0=\bm{0}
+  \label{eq:app-ntk-error-flow}
+\end{equation}
+を満たす．右辺の第2項が，NTKの変化によって生じるずれである．
+定数変化法により，
+\begin{equation}
+  \bm{d}_t=-\eta\int_0^t
+    e^{-\eta\bm{K}_0(t-s)}
+    (\bm{K}_s-\bm{K}_0)\bm{e}_s\,ds
+  \label{eq:app-ntk-error-integral}
+\end{equation}
+となる．$\bm{K}_0\succeq\kappa\bm{I}$，$\|\bm{e}_s\|_2\leq E$ と，NTKの一様な評価を使うと，
+\begin{equation}
+  \|\bm{f}_t-\bm{f}^{\mathrm{lin}}_t\|_2
+  =\|\bm{d}_t\|_2
+  \leq\eta\Delta_M E\int_0^t e^{-\eta\kappa(t-s)}\,ds
+  \leq\frac{\Delta_M E}{\kappa}
+  \label{eq:app-ntk-linearization-bound}
+\end{equation}
+を得る．したがって，線形化モデルとの訓練出力の差も，学習の全時間にわたってゼロに近づく．
+
+多層ネットワークでも，局所的なヤコビ行列の評価，残差の減衰，軌道の移動量の評価を組み合わせる証明の構造は同じである．
+Leeら\cite{lee2019wide}は，層ごとの順伝播と逆伝播を使って対応する局所評価を行い，多層ネットワークのNTKの安定性と線形化モデルへの近さを示している．
+本付録の二層の計算では，$1/\sqrt{M}$ の係数によって出力のヘッセ行列が小さくなり，それがヤコビ行列の変化を小さくすることまで直接確認できた．
+
+\chapterbibliography
+
+\end{document}

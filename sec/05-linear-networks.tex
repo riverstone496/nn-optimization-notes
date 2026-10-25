@@ -1,0 +1,581 @@
+\documentclass[../main.tex]{subfiles}
+
+\begin{document}
+% 単独でコンパイルした場合も、全体版と章番号をそろえる。
+\ifSubfilesClassLoaded{\setcounter{chapter}{4}}{}
+
+\chapter{線形ネットワーク}
+
+\section{自然勾配法の学習ダイナミクス}
+\label{sec:linear-natural-gradient}
+
+第4章では，二次損失の曲率を前処理でそろえると，方向による収束の速さの違いを取り除けることを見た．
+では，複数の層を持つネットワークでは，自然勾配法によって学習はどのように進むのだろうか．
+ここでは，活性化関数を恒等写像にした線形ネットワークを使って，この問いを調べる．
+線形層を重ねたモデルの出力は，重み行列の積で決まる．
+自然勾配法による学習をこの積と関数出力の時間変化として見ると，最適な線形写像への指数収束を具体的に計算できる\cite{bernacchia2018exact}．
+
+\subsection{線形ネットワークと回帰問題}
+
+入力と出力をともに $n$ 次元とし，$L$ 層の線形ネットワークを考える．
+第 $\ell$ 層の重み行列を $\bm{W}_\ell\in\mathbb{R}^{n\times n}$ とし，バイアスはゼロとする．
+入力 $\bm{x}$ から各層の出力を順に計算すると，
+\begin{equation}
+  \bm{x}_0=\bm{x},\qquad
+  \bm{x}_\ell=\bm{W}_\ell\bm{x}_{\ell-1}
+  \quad(\ell=1,\ldots,L)
+  \label{eq:linear-network}
+\end{equation}
+となる．重み行列の積は，層番号の大きい方から順に掛ける約束で
+\begin{equation}
+  \bm{W}_{s:t}:=\bm{W}_s\bm{W}_{s-1}\cdots\bm{W}_t
+  \quad(s\geq t),\qquad
+  \bm{W}_{t-1:t}:=\bm{I}
+  \label{eq:linear-weight-products}
+\end{equation}
+と書く．たとえば $\bm{W}_{3:1}=\bm{W}_3\bm{W}_2\bm{W}_1$ であり，
+ネットワーク全体の出力は $\bm{x}_L=\bm{W}_{L:1}\bm{x}$ となる．
+層を重ねても，入力から出力への写像は一つの行列 $\bm{W}_{L:1}$ で表せる．
+すべての層の成分を列ごとに並べ，さらに層の順に連結したパラメータベクトルを $\bm{\theta}\in\mathbb{R}^{Ln^2}$ と書く．
+この写像を関数として書けば，$\bm{f}_{\bm{\theta}}(\bm{x})=\bm{W}_{L:1}\bm{x}$ である．
+各層の重みの値が異なっていても，積 $\bm{W}_{L:1}$ が同じなら，すべての入力に対して同じ出力を返す．
+学習で動かすのは各層の $\bm{W}_\ell$ だが，予測を決めるのはそれらの積である．
+そこで本節では，積 $\bm{W}_{L:1}$ と，それが表す関数の出力が最適解へ近づく様子を追う．
+
+第2章の自然勾配法をこの回帰モデルに適用するため，出力の予測分布を
+\begin{equation}
+  p_{\bm{\theta}}(\bm{y}\mid\bm{x})
+  =\mathcal{N}\!\left(\bm{y};
+  \bm{W}_{L:1}\bm{x},\bm{\Sigma}_{y}\right),
+  \qquad\bm{\Sigma}_{y}\succ\bm{0}
+  \label{eq:linear-predictive-model}
+\end{equation}
+と定める．$\bm{\Sigma}_{y}$ は固定した共分散行列であり，モデルの平均だけを学習する．
+訓練データの分布を第3章と同じく $q$ と書き，負の対数尤度のうちパラメータに依存する部分を損失とする．
+ガウス密度の対数を取ると，
+\begin{equation}
+  \mathcal{L}(\bm{\theta})
+  =\frac12\mathbb{E}_{(\bm{x},\bm{y})\sim q}
+  \left[(\bm{y}-\bm{W}_{L:1}\bm{x})^\top
+  \bm{\Sigma}_{y}^{-1}
+  (\bm{y}-\bm{W}_{L:1}\bm{x})\right]
+  \label{eq:linear-regression-loss}
+\end{equation}
+となる．$\bm{\Sigma}_{y}=\bm{I}$ なら，通常の二乗誤差である．
+
+入力の二次モーメントを $\bm{\Sigma}_{x}:=\mathbb{E}_{q}[\bm{x}\bm{x}^\top]$ とおき，正定値であるとする\footnote{入力と出力の二次モーメントは有限とする．}．
+まず，各層への分解を考える前に，一つの行列として最適な線形写像を求める．
+$\bm{\Sigma}_{yx}:=\mathbb{E}_{q}[\bm{y}\bm{x}^\top]$ とおくと，積行列に関する勾配は
+\begin{equation}
+  \bm{g}_{\mathrm{tot}}
+  :=\nabla_{\bm{W}_{L:1}}\mathcal{L}
+  =\bm{\Sigma}_{y}^{-1}
+  (\bm{W}_{L:1}\bm{\Sigma}_{x}-\bm{\Sigma}_{yx})
+  \label{eq:linear-total-gradient}
+\end{equation}
+である．これをゼロとおけば，最適な積行列は
+\begin{equation}
+  \bm{W}_{L:1}^*
+  =\bm{\Sigma}_{yx}\bm{\Sigma}_{x}^{-1}
+  \label{eq:linear-optimum}
+\end{equation}
+と求まる．以下では，各層の学習によって，この行列へどのように近づくかを見る．
+
+\subsection{通常の勾配とフィッシャー情報行列}
+
+一つの層を変えたとき，出力がどう変わるかを計算する．
+第 $\ell$ 層より後と前の重みの積は，それぞれ
+$\bm{W}_{L:\ell+1}$，$\bm{W}_{\ell-1:1}$ である．
+端の層では，空の積の約束により $\bm{W}_{L:L+1}=\bm{W}_{0:1}=\bm{I}$ となる．
+この記号を使うと $\bm{W}_{L:1}=\bm{W}_{L:\ell+1}\bm{W}_\ell\bm{W}_{\ell-1:1}$ であり，
+第 $\ell$ 層だけに変化 $d\bm{W}_\ell$ を加えたときの積行列の変化は
+$d\bm{W}_{L:1}=\bm{W}_{L:\ell+1}\,d\bm{W}_\ell\,\bm{W}_{\ell-1:1}$ となる．
+したがって，連鎖律から，各層の勾配は
+\begin{equation}
+  \bm{g}_\ell:=\nabla_{\bm{W}_\ell}\mathcal{L}
+  =\bm{W}_{L:\ell+1}^\top\bm{g}_{\mathrm{tot}}\bm{W}_{\ell-1:1}^\top
+  \label{eq:linear-layer-gradient}
+\end{equation}
+である．
+
+時間変化を調べるため，ここからは連続時間 $t$ を使う．
+通常の勾配降下法の連続時間での式を $d\bm{W}_\ell/dt=-\eta\bm{g}_\ell$（$\eta>0$）とすると，
+積の微分により
+\begin{equation}
+  \frac{d\bm{W}_{L:1}}{dt}
+  =\sum_{\ell=1}^L\bm{W}_{L:\ell+1}
+  \frac{d\bm{W}_\ell}{dt}\bm{W}_{\ell-1:1}
+  =-\eta\sum_{\ell=1}^L
+  \bm{W}_{L:\ell+1}\bm{W}_{L:\ell+1}^\top\bm{g}_{\mathrm{tot}}
+  \bm{W}_{\ell-1:1}^\top\bm{W}_{\ell-1:1}
+  \label{eq:linear-gradient-flow}
+\end{equation}
+を得る．同じ積行列を表す重みでも，各層への分解の仕方によって進み方が変わる．
+たとえば，$n=1$，$L=2$，$\bm{\Sigma}_{x}=\bm{\Sigma}_{y}=1$ として，
+二つの重みを $a,b$，最適な積を $s$ と書けば，
+$d(ab)/dt=-\eta(a^2+b^2)(ab-s)$ となる．
+目標までの差が同じでも，$a,b$ がともに小さいと積の変化は遅くなる．
+
+自然勾配法では，予測分布の変化を表すフィッシャー情報行列 $\bm{F}$ を使って，この更新を調整する．
+その構造を見るため，出力の残差を各層へ戻したベクトルを
+$\bm{e}_\ell:=\bm{W}_{L:\ell+1}^\top\bm{\Sigma}_{y}^{-1}(\bm{y}-\bm{W}_{L:1}\bm{x})$ とおく．
+1サンプルの負の対数尤度の勾配は $-\bm{e}_\ell\bm{x}_{\ell-1}^\top$ である．
+フィッシャー情報行列を計算するときは，入力を $q$ の周辺分布 $q_{\bm{x}}$ から取り，
+出力をモデルの予測分布 $p_{\bm{\theta}}(\cdot\mid\bm{x})$ から取る．
+この平均を $\mathbb{E}_{p_{\bm{\theta}}}$ と書くと，モデルの残差の条件付き平均はゼロ，共分散は $\bm{\Sigma}_{y}$ なので，
+\begin{equation}
+  \mathbb{E}_{p_{\bm{\theta}}}
+  [\bm{e}_\ell\bm{e}_j^\top\mid\bm{x}]
+  =\bm{W}_{L:\ell+1}^\top\bm{\Sigma}_{y}^{-1}\bm{W}_{L:j+1}
+  \label{eq:linear-error-moment}
+\end{equation}
+となる．右辺は入力によらない．
+また，$\bm{x}_{\ell-1}=\bm{W}_{\ell-1:1}\bm{x}$ だから，
+$\mathbb{E}_{q_{\bm{x}}}[\bm{x}_{\ell-1}\bm{x}_{j-1}^\top]
+=\bm{W}_{\ell-1:1}\bm{\Sigma}_{x}\bm{W}_{j-1:1}^\top$ である．
+両者を使うと，層 $\ell,j$ に対応するフィッシャー情報行列のブロックは
+\begin{equation}
+  \bm{F}_{\ell j}
+  =(\bm{W}_{\ell-1:1}\bm{\Sigma}_{x}\bm{W}_{j-1:1}^\top)
+  \otimes(\bm{W}_{L:\ell+1}^\top\bm{\Sigma}_{y}^{-1}\bm{W}_{L:j+1})
+  \label{eq:linear-fisher-blocks}
+\end{equation}
+と求まる．ここで $\otimes$ は第3章で使ったクロネッカー積であり，行列の成分は列ごとに並べている．
+
+$L\geq2$ では，予測分布を定める $\bm{W}_{L:1}$ の成分数 $n^2$ に対し，
+全層のパラメータ数は $Ln^2$ ある．
+たとえば，可逆行列 $\bm{R}$ を使って隣り合う二層を $\bm{R}\bm{W}_\ell$，$\bm{W}_{\ell+1}\bm{R}^{-1}$ に変えても，積は同じである．
+このように予測分布を変えないパラメータの変化があるため，$\bm{F}$ は特異になる．
+そこで，自然勾配の方向 $\bm{v}$ を $\bm{F}\bm{v}=\nabla_{\bm{\theta}}\mathcal{L}$ の解として求め，
+$d\bm{\theta}/dt=-\eta\bm{v}$ とする．
+この方程式の解の一つを，層ごとの行列で構成する．
+
+\subsection{各層の自然勾配を求める}
+
+以下では，各層の重み行列が可逆である区間を考える．
+第 $\ell$ 層の入力と，モデルの分布で平均した逆伝播誤差の二次統計を，それぞれ
+\begin{align}
+  \bm{\Lambda}_\ell
+  :=\mathbb{E}_{q_{\bm{x}}}
+  [\bm{x}_{\ell-1}\bm{x}_{\ell-1}^\top]
+  &=\bm{W}_{\ell-1:1}\bm{\Sigma}_{x}\bm{W}_{\ell-1:1}^\top,
+  \notag\\
+  \bm{\Omega}_\ell
+  :=\mathbb{E}_{p_{\bm{\theta}}}[\bm{e}_\ell\bm{e}_\ell^\top]
+  &=\bm{W}_{L:\ell+1}^\top\bm{\Sigma}_{y}^{-1}\bm{W}_{L:\ell+1}
+  \label{eq:linear-layer-moments}
+\end{align}
+とおく．これらは $n\times n$ の正定値行列である．
+式\eqref{eq:linear-fisher-blocks}の対角ブロックは
+$\bm{F}_{\ell\ell}=\bm{\Lambda}_\ell\otimes\bm{\Omega}_\ell$ なので，
+その逆行列を勾配に作用させる操作は，行列の形では
+$\bm{\Omega}_\ell^{-1}\bm{g}_\ell\bm{\Lambda}_\ell^{-1}$ となる．
+この左右からの前処理を使い，各層の方向を
+\begin{equation}
+  \bm{v}_\ell
+  =\frac1L\bm{\Omega}_\ell^{-1}
+  \bm{g}_\ell\bm{\Lambda}_\ell^{-1}
+  \label{eq:linear-natural-direction}
+\end{equation}
+と選ぶ．$\bm{v}_\ell$ を各層の順にベクトル化して連結したものが $\bm{v}$ である．
+係数 $1/L$ は，$L$ 個の層が積行列の変化を分担することに対応する．
+これが層間のブロックも含めた $\bm{F}\bm{v}=\nabla_{\bm{\theta}}\mathcal{L}$ の解になることを確かめる．
+
+まず，逆行列を展開すると，
+$\bm{\Omega}_\ell^{-1}=\bm{W}_{L:\ell+1}^{-1}\bm{\Sigma}_{y}\bm{W}_{L:\ell+1}^{-\top}$，
+$\bm{\Lambda}_\ell^{-1}=\bm{W}_{\ell-1:1}^{-\top}\bm{\Sigma}_{x}^{-1}\bm{W}_{\ell-1:1}^{-1}$ である．
+式\eqref{eq:linear-layer-gradient}を代入すれば，
+\begin{align}
+  \bm{v}_\ell
+  &=\frac1L\bm{W}_{L:\ell+1}^{-1}\bm{\Sigma}_{y}
+  \bm{g}_{\mathrm{tot}}\bm{\Sigma}_{x}^{-1}\bm{W}_{\ell-1:1}^{-1}
+  \notag\\
+  &=\frac1L\bm{W}_{L:\ell+1}^{-1}
+  (\bm{W}_{L:1}-\bm{W}_{L:1}^*)
+  \bm{W}_{\ell-1:1}^{-1}
+  \label{eq:linear-natural-cancellation}
+\end{align}
+となる．第2行では式\eqref{eq:linear-total-gradient}と式\eqref{eq:linear-optimum}を使った．
+左右の前処理によって，通常の勾配に含まれていた他の層の転置行列が，逆行列へ置き換わった．
+
+次に，$\operatorname{vec}(\bm{P}\bm{Q}\bm{R})
+=(\bm{R}^\top\otimes\bm{P})\operatorname{vec}(\bm{Q})$ を使い，
+第 $\ell$ ブロックにおける $\bm{F}\bm{v}$ を計算する．
+式\eqref{eq:linear-fisher-blocks}から，
+\begin{align}
+  \sum_{j=1}^L\bm{F}_{\ell j}\operatorname{vec}(\bm{v}_j)
+  &=\operatorname{vec}\!\left[
+  \bm{W}_{L:\ell+1}^\top\bm{\Sigma}_{y}^{-1}
+  \left(\sum_{j=1}^L\bm{W}_{L:j+1}\bm{v}_j\bm{W}_{j-1:1}\right)
+  \bm{\Sigma}_{x}\bm{W}_{\ell-1:1}^\top\right]
+  \notag\\
+  &=\operatorname{vec}\!\left[
+  \bm{W}_{L:\ell+1}^\top\bm{\Sigma}_{y}^{-1}
+  (\bm{W}_{L:1}-\bm{W}_{L:1}^*)
+  \bm{\Sigma}_{x}\bm{W}_{\ell-1:1}^\top\right]
+  =\operatorname{vec}(\bm{g}_\ell)
+  \label{eq:linear-natural-verification}
+\end{align}
+を得る．各 $\bm{W}_{L:j+1}\bm{v}_j\bm{W}_{j-1:1}$ が
+$(\bm{W}_{L:1}-\bm{W}_{L:1}^*)/L$ に等しいため，和を取ると係数 $1/L$ が消える．
+こうして，式\eqref{eq:linear-natural-direction}は，全体のフィッシャー情報行列に対する自然勾配の方向を与える．
+大きさ $Ln^2\times Ln^2$ の行列全体を構成する代わりに，各層で二つの $n\times n$ の行列を使って計算できた．
+
+\subsection{積行列と損失の指数収束}
+
+求めた自然勾配による各層の時間変化は，
+\begin{equation}
+  \frac{d\bm{W}_\ell}{dt}
+  =-\frac{\eta}{L}\bm{\Omega}_\ell^{-1}
+  \bm{g}_\ell\bm{\Lambda}_\ell^{-1}
+  =-\frac{\eta}{L}\bm{W}_{L:\ell+1}^{-1}
+  (\bm{W}_{L:1}-\bm{W}_{L:1}^*)
+  \bm{W}_{\ell-1:1}^{-1}
+  \label{eq:linear-natural-flow}
+\end{equation}
+である．これを積の微分に代入すると，各層の前後にあった行列が相殺され，
+\begin{align}
+  \frac{d\bm{W}_{L:1}}{dt}
+  &=\sum_{\ell=1}^L\bm{W}_{L:\ell+1}
+  \frac{d\bm{W}_\ell}{dt}\bm{W}_{\ell-1:1}\notag\\
+  &=-\frac{\eta}{L}\sum_{\ell=1}^L
+  (\bm{W}_{L:1}-\bm{W}_{L:1}^*)
+  =-\eta(\bm{W}_{L:1}-\bm{W}_{L:1}^*)
+  \label{eq:linear-total-natural-flow}
+\end{align}
+となる．通常の勾配で現れた式\eqref{eq:linear-gradient-flow}の
+$\bm{W}_{L:\ell+1}\bm{W}_{L:\ell+1}^\top$ や $\bm{W}_{\ell-1:1}^\top\bm{W}_{\ell-1:1}$ が取り除かれた．
+積行列の各成分は，目標までの差に比例する速さで動く．
+この微分方程式を解けば，
+\begin{equation}
+  \bm{W}_{L:1}(t)-\bm{W}_{L:1}^*
+  =e^{-\eta t}
+  \bigl(\bm{W}_{L:1}(0)-\bm{W}_{L:1}^*\bigr)
+  \label{eq:linear-total-solution}
+\end{equation}
+を得る．可逆性が保たれる軌道では，積行列は最適な線形写像へ指数的に収束する．
+係数 $1/L$ で各層の更新をそろえたことで，この収束率は深さ $L$ にも重みの分解の仕方にも依存しない．
+先ほどの二層のスカラーの例なら，$d(ab)/dt=-\eta(ab-s)$ であり，
+通常の勾配にあった $a^2+b^2$ による速度の変化が消える．
+
+関数出力の収束も，この式から直接分かる．
+時刻 $t$ の出力を $\bm{f}_t(\bm{x}):=\bm{W}_{L:1}(t)\bm{x}$，
+最適な線形写像の出力を $\bm{f}_*(\bm{x}):=\bm{W}_{L:1}^*\bm{x}$ と書く．
+式\eqref{eq:linear-total-solution}の右から入力 $\bm{x}$ を掛けると，
+\begin{equation}
+  \bm{f}_t(\bm{x})-\bm{f}_*(\bm{x})
+  =e^{-\eta t}
+  \bigl(\bm{f}_0(\bm{x})-\bm{f}_*(\bm{x})\bigr)
+  \label{eq:linear-output-solution}
+\end{equation}
+を得る．どの入力に対しても，出力の誤差が同じ率で指数的に減少する．
+各層への重みの分解が異なっていても，初期の積行列が同じなら，関数出力は同じ時間変化をたどる．
+
+最後に，この結果から損失の変化を求める．
+最適な積行列における損失を $\mathcal{L}_*$，
+積行列の誤差を $\bm{\Delta}(t):=\bm{W}_{L:1}(t)-\bm{W}_{L:1}^*$ と書く．
+式\eqref{eq:linear-regression-loss}で残差を
+$\bm{y}-\bm{W}_{L:1}^*\bm{x}-\bm{\Delta}\bm{x}$ と分けると，
+$\mathbb{E}_q[(\bm{y}-\bm{W}_{L:1}^*\bm{x})\bm{x}^\top]
+=\bm{\Sigma}_{yx}-\bm{W}_{L:1}^*\bm{\Sigma}_{x}=\bm{0}$ により交差項が消える．
+したがって，最小損失との差は
+\begin{equation}
+  \mathcal{L}(\bm{\theta}(t))-\mathcal{L}_*
+  =\frac12\operatorname{Tr}\!\left[
+  \bm{\Sigma}_{y}^{-1}\bm{\Delta}(t)
+  \bm{\Sigma}_{x}\bm{\Delta}(t)^\top\right]
+  =e^{-2\eta t}
+  \bigl(\mathcal{L}(\bm{\theta}(0))-\mathcal{L}_*\bigr)
+  \label{eq:linear-loss-solution}
+\end{equation}
+となる．積行列の誤差が $e^{-\eta t}$ 倍になり，損失差はその二次式なので $e^{-2\eta t}$ 倍になる．
+線形写像で出力を完全に表せるデータなら $\mathcal{L}_*=0$ であり，損失そのものがこの速さでゼロへ近づく．
+
+この収束則は，損失の勾配とフィッシャー情報行列を使った連続時間の式から得られたものである．
+離散時間の学習では，反復 $k$ で各量を評価し，
+$\bm{W}_\ell^{(k+1)}=\bm{W}_\ell^{(k)}
+-(\eta/L)\bm{\Omega}_{\ell,k}^{-1}\bm{g}_{\ell,k}\bm{\Lambda}_{\ell,k}^{-1}$ と更新する．
+この式の積行列の変化は，学習率の一次までで式\eqref{eq:linear-total-natural-flow}に対応する．
+
+\begin{samepage}
+自然勾配法の収束を理解するうえで，ここで直接追えたのは，重みの積と，その積が定める関数出力である．
+各層の更新には他の層の重みが現れるが，積行列と関数出力の時間変化ではそれらが相殺され，最適な線形写像への誤差だけが残る．
+その結果，出力の誤差は $e^{-\eta t}$，最小損失との差は $e^{-2\eta t}$ に比例して減少する．
+\par
+\end{samepage}
+
+\section{Saxe SolutionとFukumizu Solution}
+\label{sec:linear-exact-solutions}
+
+線形ネットワークの学習では，重みの積の特異値がどう変化するかを調べることが多い．
+特異値は，対応する入力方向の成分を出力へどの強さで伝えるかを表す．
+その時間変化が分かれば，どの成分が先に学習され，どの成分が遅れるかを説明できる．
+ここでは，通常の勾配降下法について，特異値ごとに独立な方程式を得るSaxe解と，行列のまま解くFukumizu解を順に説明する．
+
+\subsection{特異値ごとの力学系}
+
+前節の設定で $\bm{\Sigma}_x=\bm{\Sigma}_y=\bm{I}$ とする．
+このとき最適な積行列は $\bm{W}_{L:1}^*=\bm{\Sigma}_{yx}$ であり，損失差は
+\begin{equation}
+  \mathcal{L}-\mathcal{L}_*
+  =\frac12\|\bm{W}_{L:1}-\bm{\Sigma}_{yx}\|_{\mathrm F}^2
+  \label{eq:linear-whitened-loss}
+\end{equation}
+である．目標の写像を特異値分解して
+$\bm{\Sigma}_{yx}=\bm{U}\bm{\Sigma}_*\bm{V}^\top$，
+$\bm{\Sigma}_*=\operatorname{diag}(s_1^*,\ldots,s_n^*)$ と書く．
+以下では $s_i^*>0$ のモードを考える．
+第 $i$ モードとは，入力の右特異ベクトル $\bm{v}_i$ に沿った成分を，左特異ベクトル $\bm{u}_i$ の方向へ写す成分のことである．
+目標の写像では，この成分を $s_i^*$ 倍して出力する．
+
+まず，重みの特異ベクトルが初めからこの目標にそろっている場合を考える．
+各層の重みを
+\begin{equation}
+  \bm{W}_\ell
+  =\bm{R}_\ell\operatorname{diag}(\sigma_{\ell,1},\ldots,\sigma_{\ell,n})
+  \bm{R}_{\ell-1}^\top,
+  \qquad \bm{R}_0=\bm{V},\quad\bm{R}_L=\bm{U}
+  \label{eq:linear-aligned-weights}
+\end{equation}
+と書く．$\bm{R}_1,\ldots,\bm{R}_{L-1}$ は固定した直交行列であり，$\sigma_{\ell,i}$ は正とする．
+隣り合う層の直交行列が相殺されるので，積行列は
+\begin{equation}
+  \bm{W}_{L:1}
+  =\bm{U}\operatorname{diag}(s_1,\ldots,s_n)\bm{V}^\top,
+  \qquad s_i:=\prod_{\ell=1}^L \sigma_{\ell,i}
+  \label{eq:linear-mode-products}
+\end{equation}
+となる．$s_i$ が学習中の写像の第 $i$ モードの強さであり，目標は $s_i=s_i^*$ である．
+この形では，損失差は $\frac12\sum_i(s_i-s_i^*)^2$ とモードごとに分かれる．
+
+この整列条件は，隠れ層の空間での可換性としても表せる．
+隣り合う層の二次統計 $\bm{W}_\ell\bm{W}_\ell^\top$ と
+$\bm{W}_{\ell+1}^\top\bm{W}_{\ell+1}$ は，ともに $\bm{R}_\ell$ を基底として対角化される．
+したがって，交換子を $[\bm{A},\bm{B}]:=\bm{A}\bm{B}-\bm{B}\bm{A}$ と書くと，
+\begin{equation}
+  [\bm{W}_\ell\bm{W}_\ell^\top,
+  \bm{W}_{\ell+1}^\top\bm{W}_{\ell+1}]=\bm{0}
+  \quad(\ell=1,\ldots,L-1)
+  \label{eq:linear-adjacent-commutation}
+\end{equation}
+となる．この意味で，隣り合う層は同じモードを共有する．
+
+各層の勾配にも同じ直交行列が現れるため，勾配降下法は式\eqref{eq:linear-aligned-weights}の形を保つ．
+その対角成分だけを取り出すと，
+\begin{equation}
+  \frac{d\sigma_{\ell,i}}{dt}
+  =\eta(s_i^*-s_i)\prod_{j\ne\ell}\sigma_{j,i}
+  \label{eq:linear-saxe-layer-ode}
+\end{equation}
+を得る\cite{saxe2014exact}．
+異なるモード間の結合が消え，各モードについて $L$ 個の重みを追えばよくなった．
+さらに，層間で初期値の大きさをそろえ，$\sigma_{1,i}(0)=\cdots=\sigma_{L,i}(0)$ とする．
+このとき，隣り合う層の二次統計は固有ベクトルだけでなく固有値もそろい，
+$\bm{W}_\ell\bm{W}_\ell^\top=\bm{W}_{\ell+1}^\top\bm{W}_{\ell+1}$ となる．
+これをbalanced条件と呼ぶ．
+この等しさは更新後も保たれるので，共通の値を $\sigma_i(t)$ と書けば $s_i=\sigma_i^L$ であり，
+\begin{equation}
+  \frac{ds_i}{dt}
+  =\eta L s_i^{\,2-2/L}(s_i^*-s_i)
+  \label{eq:linear-saxe-deep-ode}
+\end{equation}
+となる．多層の重みを学習する問題が，各モードにつき一つの非線形微分方程式に帰着した．
+
+\subsection{Saxe解：モードごとの学習曲線}
+
+二層のネットワークでは，式\eqref{eq:linear-saxe-deep-ode}は
+\begin{equation}
+  \frac{ds_i}{dt}=2\eta s_i(s_i^*-s_i)
+  \label{eq:linear-saxe-two-layer-ode}
+\end{equation}
+である．初期値を $s_{i,0}:=s_i(0)$ とし，$0<s_{i,0}<s_i^*$ とする．
+変数を分離すると，
+\begin{equation}
+  \int_{s_{i,0}}^{s_i(t)}\frac{ds}{s(s_i^*-s)}=2\eta t,
+  \qquad
+  \frac1{s_i^*}\log\frac{s_i(t)(s_i^*-s_{i,0})}{s_{i,0}(s_i^*-s_i(t))}
+  =2\eta t
+\end{equation}
+となり，$s_i(t)$ について解けば，
+\begin{equation}
+  s_i(t)
+  =\frac{s_i^*}{1+(s_i^*/s_{i,0}-1)e^{-2\eta s_i^* t}}
+  \label{eq:linear-saxe-solution}
+\end{equation}
+を得る．これが，層間の大きさがそろった二層ネットワークに対するSaxe解である．
+積行列と関数出力は，この $s_i(t)$ を式\eqref{eq:linear-mode-products}に戻すことで求まる．
+
+この解は，小さい重みからの学習が初めは遅く，途中から速くなる理由を説明する．
+$s_i\ll s_i^*$ の間は $ds_i/dt\approx2\eta s_i^* s_i$ であり，更新の速さ自体が現在の $s_i$ に比例する．
+初期値が小さいほど，目標の大きさに達するまで時間がかかる．
+$s_i$ が増えると変化も速くなり，最後は残差 $s_i^*-s_i$ が小さくなるため減速する．
+このため学習曲線はS字形になる．
+
+また，時間は指数の中で $\eta s_i^* t$ という組合せで現れる．
+初期の相対的な強さ $s_{i,0}/s_i^*$ をそろえて比較すると，$s_i^*$ の大きいモードほど早く学習される．
+通常の勾配降下法は，目標の写像の強い成分から順に学習を進めるのである．
+より深いネットワークでも，式\eqref{eq:linear-saxe-deep-ode}の $s_i^{2-2/L}$ が，小さい積行列からの学習速度を左右する．
+
+\subsection{Fukumizu解：モードの結合を行列のまま解く}
+
+二層の場合について，ここでのFukumizu解は，Saxe解と同じ白色化・balanced条件を保ちながら，目標と重みの特異ベクトルがそろっていない初期値も扱う．
+隣り合う層の二次統計が可換という条件は共有し，目標に対するモードの向きと結合も行列のまま追う点で，Saxe解を一般化している．
+二層ネットワークの勾配降下法を行列Riccati方程式へ書き直して解くのが，Fukumizuの方法である\cite{fukumizu1998batch,braun2022exact}．
+
+同じ損失のもとで，二つの重みの更新は
+\begin{equation}
+  \frac{d\bm{W}_1}{dt}
+  =\eta\bm{W}_2^\top(\bm{\Sigma}_{yx}-\bm{W}_{2:1}),
+  \qquad
+  \frac{d\bm{W}_2}{dt}
+  =\eta(\bm{\Sigma}_{yx}-\bm{W}_{2:1})\bm{W}_1^\top
+  \label{eq:linear-fukumizu-weight-flow}
+\end{equation}
+となる．これから $\bm{W}_1\bm{W}_1^\top-\bm{W}_2^\top\bm{W}_2$ を微分するとゼロになる．
+そこで，初期値に
+\begin{equation}
+  \bm{W}_1(0)\bm{W}_1(0)^\top
+  =\bm{W}_2(0)^\top\bm{W}_2(0)
+  \label{eq:linear-balanced-initialization}
+\end{equation}
+を選ぶ．これは，前項のSaxe解で置いたbalanced条件を二層の場合に書いたものである．
+両層の二次統計が等しいので，式\eqref{eq:linear-adjacent-commutation}の可換性も成り立つ．
+この条件は隠れ層での両層の対応を定め，目標 $\bm{\Sigma}_{yx}$ に対する特異ベクトルの向きは自由に選べる．
+
+二つの重みを一つにまとめるため，
+\begin{equation}
+  \bm{Z}:=\begin{pmatrix}\bm{W}_1^\top\\\bm{W}_2\end{pmatrix},
+  \qquad
+  \bm{K}:=\begin{pmatrix}\bm{0}&\bm{\Sigma}_{yx}^\top\\\bm{\Sigma}_{yx}&\bm{0}\end{pmatrix},
+  \qquad
+  \bm{P}:=\bm{Z}\bm{Z}^\top
+  \label{eq:linear-fukumizu-blocks}
+\end{equation}
+とおく．$\bm{Z}$ は $2n\times n$，$\bm{K}$ と $\bm{P}$ は $2n\times2n$ の行列である．
+balancedの条件を使うと，式\eqref{eq:linear-fukumizu-weight-flow}は
+$d\bm{Z}/dt=\eta\bm{K}\bm{Z}-(\eta/2)\bm{Z}\bm{Z}^\top\bm{Z}$ とまとまる．
+両側から $\bm{Z}^\top$，$\bm{Z}$ を掛けて積を微分すれば，
+\begin{equation}
+  \frac{d\bm{P}}{dt}
+  =\eta(\bm{K}\bm{P}+\bm{P}\bm{K}-\bm{P}^2)
+  \label{eq:linear-fukumizu-riccati}
+\end{equation}
+を得る．未知の行列の二次の項を含むこの形を，行列Riccati方程式という．
+
+この方程式は，行列指数関数を使って解ける．
+$\bm{Z}_0:=\bm{Z}(0)$，$\bm{E}(t):=e^{\eta\bm{K}t}$ とおくと，解は
+\begin{align}
+  \bm{B}(t)
+  &:=\bm{I}+\eta\int_0^t
+  \bm{Z}_0^\top e^{2\eta\bm{K}\tau}\bm{Z}_0\,d\tau,
+  \notag\\
+  \bm{P}(t)
+  &=\bm{E}(t)\bm{Z}_0\bm{B}(t)^{-1}\bm{Z}_0^\top\bm{E}(t)
+  \label{eq:linear-fukumizu-solution}
+\end{align}
+である\footnote{$\bm{K}$ は対称なので，$d\bm{B}/dt=\eta\bm{Z}_0^\top\bm{E}(t)^2\bm{Z}_0$ と逆行列の微分公式を使うと，式\eqref{eq:linear-fukumizu-riccati}を満たすことを直接確かめられる．}．
+ここで求めた $\bm{P}$ の中には，
+\begin{equation}
+  \bm{P}(t)
+  =\begin{pmatrix}
+    \bm{W}_1^\top\bm{W}_1&\bm{W}_{2:1}^\top\\
+    \bm{W}_{2:1}&\bm{W}_2\bm{W}_2^\top
+  \end{pmatrix}
+  \label{eq:linear-fukumizu-observables}
+\end{equation}
+のように，重みの積と各層の二次統計が含まれている．
+左下のブロックを取り出せば，積行列，したがって関数出力の時間変化が分かる．
+初期の向きが目標とずれている場合の，モード間の結合もこの行列解に含まれる．
+
+Saxe解で置いた目標との整列は，この拡大した行列では
+\begin{equation}
+  [\bm{K},\bm{P}(0)]=\bm{0}
+  \label{eq:linear-target-commutation}
+\end{equation}
+という可換性も与える．この場合，目標と初期値を同じ基底で対角化でき，行列解はモードごとに分かれる．
+層間の大きさもそろっていれば，第 $i$ モードの分子は $s_{i,0}e^{2\eta s_i^* t}$，
+分母は $1+(s_{i,0}/s_i^*)(e^{2\eta s_i^* t}-1)$ となり，式\eqref{eq:linear-saxe-solution}に一致する．
+Fukumizu解は，同じbalanced条件のもとで一般の初期値 $\bm{P}(0)$ を受け取り，目標に対する向きやモード間の結合も含めて積行列の変化を記述する．
+その初期値を目標と整列させた場合が，モードごとの学習速度を読み取りやすいSaxe解である．
+
+\section{前処理勾配法におけるSaxe Solution}
+\label{sec:linear-preconditioned-modes}
+
+前節と同じく特異ベクトルを目標にそろえ，各層のモードの大きさを $\sigma_i(t)>0$ にそろえる．
+積行列の特異値は $s_i=\sigma_i^L$ である．
+この設定で，前処理によってSaxeの力学系がどう変わるかを調べる．
+
+\subsection{NGD：積行列の誤差に比例する更新}
+
+5.1節の自然勾配法をモードごとに書くと，各層は
+\begin{equation}
+  \frac{d\sigma_i}{dt}
+  =\frac{\eta}{L}\frac{s_i^*-s_i}{\sigma_i^{L-1}},
+  \qquad
+  \frac{ds_i}{dt}=\eta(s_i^*-s_i)
+  \label{eq:linear-ngd-mode-ode}
+\end{equation}
+に従う．通常の勾配降下法にあった $s_i^{2-2/L}$ の因子が取り除かれた．
+したがって，Saxe解に対応する積行列の特異値の解は
+\begin{equation}
+  s_i(t)=s_i^*+(s_{i,0}-s_i^*)e^{-\eta t},
+  \qquad
+  \sigma_i(t)=\bigl[s_i^*+(s_{i,0}-s_i^*)e^{-\eta t}\bigr]^{1/L}
+  \label{eq:linear-ngd-mode-solution}
+\end{equation}
+となる\cite{bernacchia2018exact,huh2020curvature}．
+各モードの残差は同じ率で減少し，小さい初期値から始めたことによるS字形の遅れが消える．
+初期の残差に対する比 $(s_i^*-s_i(t))/(s_i^*-s_{i,0})$ は，目標の特異値 $s_i^*$ によらず $e^{-\eta t}$ である．
+これは，前処理が各層の勾配の大きさを補正し，積行列が目標までの距離に比例する速さで動くようにしていることを表す．
+
+\subsection{Muon：各層の特異値を一定の速さで動かす更新}
+
+Muonについては，第2章で説明した，momentumを使わず直交化を厳密に行う更新を考える．
+この設定ではSpectralGDと一致する．
+式\eqref{eq:linear-saxe-layer-ode}から，各層の勾配の第 $i$ モードの成分は
+$\sigma_i^{L-1}(s_i-s_i^*)$ である．
+この成分の絶対値を $1$ にそろえると，残るのは $s_i-s_i^*$ の符号なので，
+\begin{equation}
+  \frac{d\sigma_i}{dt}=\eta\operatorname{sign}(s_i^*-s_i),
+  \qquad
+  \frac{ds_i}{dt}
+  =\eta L s_i^{\,1-1/L}\operatorname{sign}(s_i^*-s_i)
+  \label{eq:linear-muon-mode-ode}
+\end{equation}
+となる\cite{vasudeva2026muon}．
+初期値が $0<s_{i,0}<s_i^*$ なら，到達前はすべてのモードで $d\sigma_i/dt=\eta$ である．
+目標に達した成分の更新をゼロとすると，解は
+\begin{equation}
+  \sigma_i(t)=\min\{s_{i,0}^{1/L}+\eta t,\ (s_i^*)^{1/L}\},
+  \qquad
+  s_i(t)=\min\{(s_{i,0}^{1/L}+\eta t)^L,\ s_i^*\}
+  \label{eq:linear-muon-mode-solution}
+\end{equation}
+と求まる\footnote{ここでは連続時間の更新を考えている．有限の学習率で符号方向へ更新する場合は，目標を越えて動くことがある．}．
+各層の特異値は直線的に増え，積行列の特異値はその $L$ 乗として増える．
+目標への到達時刻は
+\begin{equation}
+  T_i=\frac{(s_i^*)^{1/L}-s_{i,0}^{1/L}}{\eta}
+  \label{eq:linear-muon-mode-time}
+\end{equation}
+である．小さい正の初期値からの極限では，二層なら $s_i(t)=\min\{\eta^2t^2,s_i^*\}$ となる．
+通常の勾配降下法で初期値の小ささが生む長い遅れが消え，目標の大きさによる到達時間の違いは $(s_i^*)^{1/L}$ を通じて現れる．
+
+二つの前処理は，異なる量の変化をそろえている．
+NGDでは，積行列の各モードの残差が同じ割合で減る．
+Muonでは，目標に達するまで各層の特異値が同じ速さで動く．
+二層の場合に，通常の勾配降下法，NGD，Muonの積行列の力学系を並べると，
+\begin{equation}
+  \frac{ds_i}{dt}
+  =\begin{cases}
+    2\eta s_i(s_i^*-s_i), & \text{勾配降下法},\\
+    \eta(s_i^*-s_i), & \text{NGD},\\
+    2\eta\sqrt{s_i}\operatorname{sign}(s_i^*-s_i), & \text{Muon}
+  \end{cases}
+  \label{eq:linear-mode-comparison}
+\end{equation}
+となる．線形ネットワークでは，このように重みの積の力学系へ直すことで，前処理が学習の進み方をどう変えるかを具体的に読み取れる．
+
+\chapterbibliography
+
+\end{document}

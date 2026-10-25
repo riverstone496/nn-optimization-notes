@@ -1,0 +1,203 @@
+\documentclass[../main.tex]{subfiles}
+
+\begin{document}
+% 単独でコンパイルした場合も、全体版と章番号をそろえる。
+\ifSubfilesClassLoaded{\setcounter{chapter}{5}}{}
+
+\chapter{学習レジーム}
+
+第5章では，線形ネットワークの出力が学習によってどう変わるかを調べた．
+非線形の活性化関数を持つネットワークでも，初期値のまわりで出力を線形近似すると，学習の進み方を具体的に計算できる場合がある．
+まず，この近似が学習中も成り立つNTK regime\cite{jacot2018ntk,lee2019wide}を考え，通常の勾配降下法と自然勾配法を比較する．
+
+\section{Neural Tangent Kernel}
+\label{sec:ntk}
+
+\subsection{NTK regimeと線形化された学習ダイナミクス}
+
+非線形ネットワークの学習が複雑になる理由の一つは，パラメータを変えると，出力のパラメータに対する感度も変わることである．
+この感度を表すヤコビ行列がほぼ変わらないなら，学習はどう進むだろうか．
+まず出力の時間変化を求め，その後で，ヤコビ行列を初期値で固定できる設定を考える．
+
+訓練データを $\{(\bm{x}_i,\bm{y}_i)\}_{i=1}^N$，ネットワークの出力を $\bm{f}_{\bm{\theta}}(\bm{x})\in\mathbb{R}^c$ とする．
+$\bm{\theta}\in\mathbb{R}^d$ は各層の重み $\bm{W}_\ell$ とバイアスを並べたパラメータベクトルである．
+第5章と同じく連続時間 $t$ を使い，訓練入力に対する出力と正解を縦に並べて，
+\begin{equation}
+  \bm{f}_t:=\begin{pmatrix}
+    \bm{f}_{\bm{\theta}(t)}(\bm{x}_1)\\ \vdots\\
+    \bm{f}_{\bm{\theta}(t)}(\bm{x}_N)
+  \end{pmatrix},
+  \qquad
+  \bm{y}:=\begin{pmatrix}\bm{y}_1\\ \vdots\\ \bm{y}_N\end{pmatrix}
+  \in\mathbb{R}^{Nc}
+  \label{eq:ntk-stacked-output}
+\end{equation}
+と書く．ここでは，二乗損失
+\begin{equation}
+  \mathcal{L}(\bm{\theta}(t))
+  =\frac{1}{2N}\sum_{i=1}^N
+    \|\bm{f}_{\bm{\theta}(t)}(\bm{x}_i)-\bm{y}_i\|_2^2
+  =\frac{1}{2N}\|\bm{f}_t-\bm{y}\|_2^2
+  \label{eq:ntk-loss}
+\end{equation}
+を最小にする．出力のヤコビ行列を
+\begin{equation}
+  \bm{J}_t(\bm{x})
+  :=\left.\frac{\partial\bm{f}_{\bm{\theta}}(\bm{x})}
+    {\partial\bm{\theta}}\right|_{\bm{\theta}=\bm{\theta}(t)}
+  \in\mathbb{R}^{c\times d},
+  \qquad
+  \bm{J}_t:=\begin{pmatrix}
+    \bm{J}_t(\bm{x}_1)\\ \vdots\\ \bm{J}_t(\bm{x}_N)
+  \end{pmatrix}\in\mathbb{R}^{Nc\times d}
+  \label{eq:ntk-jacobian}
+\end{equation}
+とすると，連鎖律から損失の勾配は $\nabla_{\bm{\theta}}\mathcal{L}=\bm{J}_t^\top(\bm{f}_t-\bm{y})/N$ である．
+したがって，学習率 $\eta>0$ の勾配流と，それに伴う出力の変化は
+\begin{align}
+  \frac{d\bm{\theta}}{dt}
+  &=-\frac{\eta}{N}\bm{J}_t^\top(\bm{f}_t-\bm{y}),
+  \label{eq:ntk-parameter-flow}\\
+  \frac{d\bm{f}_t}{dt}
+  &=\bm{J}_t\frac{d\bm{\theta}}{dt}
+  =-\eta\underbrace{\frac1N\bm{J}_t\bm{J}_t^\top}_{\displaystyle\bm{K}_t}
+    (\bm{f}_t-\bm{y})
+  \label{eq:ntk-output-flow}
+\end{align}
+となる．$\bm{K}_t\in\mathbb{R}^{Nc\times Nc}$ は，Neural Tangent Kernel（NTK）の訓練データ上の行列である．
+その $(i,j)$ ブロックは $\bm{J}_t(\bm{x}_i)\bm{J}_t(\bm{x}_j)^\top/N$ であり，二つの入力に対する出力が，共通のパラメータ変化によってどれだけ一緒に動くかを表す．
+ここでは，損失の係数 $1/N$ を行列 $\bm{K}_t$ に含めている．
+式\eqref{eq:ntk-output-flow}は出力についての式になったが，一般には $\bm{J}_t$，したがって $\bm{K}_t$ も学習中に変化する．
+
+この行列を初期値で固定できる設定がNTK regimeである．
+たとえば，全結合ネットワークを
+\begin{equation}
+  \bm{h}_0=\bm{x},\qquad
+  \bm{u}_\ell=\frac{\sigma_w}{\sqrt{M_{\ell-1}}}
+    \bm{W}_\ell\bm{h}_{\ell-1}+\sigma_b\bm{b}_\ell,
+  \qquad
+  \bm{h}_\ell=\phi(\bm{u}_\ell)
+  \label{eq:ntk-parameterization}
+\end{equation}
+と書く．活性化関数は隠れ層 $\ell=1,\ldots,L-1$ に適用し，最後の層の出力は $\bm{f}_{\bm{\theta}}(\bm{x})=\bm{u}_L$ とする．
+$M_\ell$ は第 $\ell$ 層の幅であり，$M_0$ は入力次元，$M_L=c$ である．
+$\sigma_w,\sigma_b$ は幅によらない係数とし，学習する $\bm{W}_\ell,\bm{b}_\ell$ の各成分を独立な標準正規分布で初期化する．
+このように，幅に依存する係数を順伝播の式に明示する書き方をNTKパラメータ化と呼ぶ．
+
+訓練データ数，層数，出力次元を固定して隠れ層の幅を大きくすると，このパラメータ化のもとでは，学習中も $\bm{J}_t\approx\bm{J}_0$，$\bm{K}_t\approx\bm{K}_0$ とみなせる\cite{jacot2018ntk,lee2019wide}\footnote{幅極限での主張には，活性化関数の滑らかさなどの条件がある．ここでは，それらの条件のもとでヤコビ行列の変化が小さくなる時間区間を考える．また，訓練誤差全体の収束を述べるときは，後で示すように $\bm{K}_0$ の正定値性を仮定する．}．
+出力そのものは変化するが，パラメータを変えたときに出力が動く方向は，ほぼ初期値のまま保たれるのである．
+ヤコビ行列とNTKの変化を抑える証明は，付録にまとめた．
+そこで，初期パラメータ $\bm{\theta}_0:=\bm{\theta}(0)$ のまわりの一次近似
+\begin{equation}
+  \bm{f}^{\mathrm{lin}}_{\bm{\theta}}(\bm{x})
+  :=\bm{f}_{\bm{\theta}_0}(\bm{x})
+  +\bm{J}_0(\bm{x})(\bm{\theta}-\bm{\theta}_0)
+  \label{eq:ntk-linearized-model}
+\end{equation}
+を学習することで，元のネットワークの学習を近似できる．
+このモデルは，入力 $\bm{x}$ に対しては非線形でも，学習するパラメータの変化 $\bm{\theta}-\bm{\theta}_0$ に対しては線形である．
+
+線形化モデルの訓練出力を $\bm{f}^{\mathrm{lin}}_t$ と書くと，ヤコビ行列は $\bm{J}_0$ で一定なので，式\eqref{eq:ntk-output-flow}は
+\begin{equation}
+  \frac{d\bm{f}^{\mathrm{lin}}_t}{dt}
+  =-\eta\bm{K}_0(\bm{f}^{\mathrm{lin}}_t-\bm{y})
+  \label{eq:ntk-linear-output-flow}
+\end{equation}
+となる．これは係数が一定の線形微分方程式である．
+残差 $\bm{f}^{\mathrm{lin}}_t-\bm{y}$ について解けば，
+\begin{equation}
+  \bm{f}^{\mathrm{lin}}_t
+  =\bm{y}+\exp(-\eta\bm{K}_0t)(\bm{f}_0-\bm{y})
+  \label{eq:ntk-linear-solution}
+\end{equation}
+を得る．固有値 $\nu_i$ に対応する残差の成分は $\exp(-\eta\nu_i t)$ 倍になる．
+したがって，$\bm{K}_0$ が正定値なら訓練誤差はゼロに近づくが，小さい固有値に対応する成分の学習は遅い．
+第4章で損失の曲率によって収束速度が変わったのと同じことが，ここでは出力の空間で起きている．
+離散時間の勾配降下法でも，線形化モデルでは
+\begin{equation}
+  \bm{f}^{\mathrm{lin},(k)}-\bm{y}
+  =(\bm{I}-\eta\bm{K}_0)^k(\bm{f}_0-\bm{y})
+  \label{eq:ntk-discrete-solution}
+\end{equation}
+と書ける．$\bm{K}_0$ が正定値なら，$0<\eta<2/\nu_{\max}$ の範囲で収束する．
+
+\subsection{NTK regimeでの自然勾配法}
+
+通常の勾配降下法では，$\bm{K}_0$ の固有値ごとに出力の収束速度が異なった．
+自然勾配法は，この違いをどう変えるのだろうか．
+第5章と同じく，予測分布を固定共分散の正規分布として，ここでは
+\begin{equation}
+  p_{\bm{\theta}}(\bm{y}\mid\bm{x})
+  =\mathcal{N}(\bm{y};\bm{f}_{\bm{\theta}}(\bm{x}),\bm{I}_c)
+  \label{eq:ntk-predictive-model}
+\end{equation}
+と選ぶ．訓練入力上の一様な経験分布を $\mu$ とすると，負の対数尤度は定数を除いて式\eqref{eq:ntk-loss}の二乗損失であり，フィッシャー情報行列は
+\begin{equation}
+  \bm{F}_t
+  =\frac1N\sum_{i=1}^N\bm{J}_t(\bm{x}_i)^\top\bm{J}_t(\bm{x}_i)
+  =\frac1N\bm{J}_t^\top\bm{J}_t
+  \label{eq:ntk-fisher}
+\end{equation}
+となる．ここで，入力は訓練データで平均し，出力はモデルの正規分布で平均している．
+$\bm{K}_t$ が出力の空間の $Nc\times Nc$ 行列であるのに対し，$\bm{F}_t$ はパラメータの空間の $d\times d$ 行列である．
+両者は，同じヤコビ行列の積の順序を入れ替えたものになっている．
+
+幅の広いネットワークでは $d>Nc$ となり，$\bm{F}_t$ は特異になる．
+そこで第5章と同様に，自然勾配の方向を $\bm{F}_t\bm{v}_t=\nabla\mathcal{L}$ の解として求める．
+その最小ノルム解を，擬似逆行列 $\bm{F}_t^+$ を使って $\bm{v}_t=\bm{F}_t^+\nabla\mathcal{L}$ と書く．
+$\bm{F}_t^+$ は，正の固有値を逆数にし，ゼロ固有値をゼロのまま残した行列である．
+自然勾配流では
+\begin{equation}
+  \frac{d\bm{\theta}}{dt}=-\eta\bm{F}_t^+\nabla\mathcal{L},
+  \qquad
+  \frac{d\bm{f}_t}{dt}
+  =-\frac{\eta}{N}\bm{J}_t\bm{F}_t^+\bm{J}_t^\top
+    (\bm{f}_t-\bm{y})
+  \label{eq:ntk-natural-flow}
+\end{equation}
+となる．つまり，出力の変化を決める行列が，通常のNTKから
+$\bm{J}_t\bm{F}_t^+\bm{J}_t^\top/N$ に変わる．
+
+NTK regimeでヤコビ行列を $\bm{J}_0$ に固定し，この行列を計算する．
+正の特異値だけを残した分解を $\bm{J}_0=\bm{U}\bm{\Sigma}\bm{V}^\top$ と書くと，
+\begin{equation}
+  \bm{F}_0^+=N\bm{V}\bm{\Sigma}^{-2}\bm{V}^\top,
+  \qquad
+  \frac1N\bm{J}_0\bm{F}_0^+\bm{J}_0^\top
+  =\bm{U}\bm{U}^\top
+  \label{eq:ntk-natural-projection}
+\end{equation}
+を得る．$\bm{K}_0\succ\bm{0}$ なら，$\bm{J}_0$ は行フルランクなので，$\bm{U}\bm{U}^\top=\bm{I}_{Nc}$ である．
+したがって，線形化モデルの自然勾配流とその解は
+\begin{equation}
+  \frac{d\bm{f}^{\mathrm{lin}}_t}{dt}
+  =-\eta(\bm{f}^{\mathrm{lin}}_t-\bm{y}),
+  \qquad
+  \bm{f}^{\mathrm{lin}}_t
+  =\bm{y}+e^{-\eta t}(\bm{f}_0-\bm{y})
+  \label{eq:ntk-natural-solution}
+\end{equation}
+となる\cite{karakida2020natural}．通常の勾配降下法では $\bm{K}_0$ の固有値に依存していた収束速度が，すべての訓練出力の方向で同じになる．
+離散時間でも残差は $(1-\eta)^k(\bm{f}_0-\bm{y})$ となり，線形化モデルでは $\eta=1$ の一回の更新で訓練出力が正解に一致する．
+学習の速さを見ている対象は，各パラメータではなく訓練入力上の関数出力である．
+
+dampingを加えた場合も，出力のダイナミクスからその効果がわかる．
+$\bm{F}_0^+$ の代わりに $(\bm{F}_0+\gamma\bm{I})^{-1}$（$\gamma>0$）を使うと，出力の変化を決める行列は
+\begin{equation}
+  \frac1N\bm{J}_0(\bm{F}_0+\gamma\bm{I})^{-1}\bm{J}_0^\top
+  =\bm{K}_0(\bm{K}_0+\gamma\bm{I})^{-1}
+  \label{eq:ntk-damped-kernel}
+\end{equation}
+となる．$\bm{K}_0$ の固有値 $\nu_i$ に対応する収束速度は $\eta\nu_i/(\nu_i+\gamma)$ である．
+dampingをゼロに近づけると速度が $\eta$ にそろい，dampingが大きいと，小さい固有値の方向の更新がより強く抑えられる．
+
+第5章の線形ネットワークと同様に，NTK regimeでも，自然勾配法による学習は関数出力の指数収束として理解できる．
+dampingのない極限では，訓練入力上の出力と正解の差が，どの方向でも同じ $e^{-\eta t}$ の割合で減衰する．
+自然勾配による前処理は，NTKの固有値に依存した学習速度の違いを取り除き，関数出力を一様な速度で正解へ近づけるのである．
+
+\section{特徴学習}
+
+
+\chapterbibliography
+
+\end{document}

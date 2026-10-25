@@ -1,0 +1,52 @@
+\documentclass[book]{jlreq}
+\usepackage{luatexja}
+\usepackage{subfiles}
+\usepackage{amsmath,amssymb,bm}
+\usepackage{url}
+\usepackage[nottoc,notlof,notlot,notindex]{tocbibind}
+\urlstyle{same}
+
+% 文献番号と本文の間隔を確保する。
+\makeatletter
+\renewcommand{\@openbib@code}{%
+  \setlength{\labelsep}{0.75em}%
+  \setlength{\leftmargin}{\labelwidth}%
+  \addtolength{\leftmargin}{\labelsep}%
+}
+\makeatother
+
+% 章別PDFでは、その章で引用した文献を末尾に出力する。
+\newcommand{\chapterbibliography}{%
+  \ifSubfilesClassLoaded{%
+    \bibliographystyle{unsrt}%
+    \bibliography{../references}%
+  }{}%
+}
+
+\title{ニューラルネットワークの最適化\\[0.5em]
+  {\large 勾配の前処理から考える}}
+\author{石川智貴}
+\date{}
+
+\begin{document}
+\maketitle
+
+\tableofcontents
+
+% 各ファイルは単独でもコンパイルできます。
+\subfile{sec/01-introduction}
+\subfile{sec/02-mirror-descent}
+\subfile{sec/03-constrained-gradient}
+\subfile{sec/04-minibatch-learning}
+\subfile{sec/05-linear-networks}
+\subfile{sec/06-infinite-width}
+\subfile{sec/07-hopfield}
+\subfile{sec/08-hyperparameters}
+
+\appendix
+\subfile{sec/appendix-ntk-stability}
+
+\bibliographystyle{unsrt}
+\bibliography{references}
+
+\end{document}
